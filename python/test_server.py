@@ -118,6 +118,15 @@ class FakeBridge:
     def export_klines(self, codes, period="day", count=240, adjust="qfq"):
         return {"dir": "/tmp", "files": [], "rows": 0, "codes": len(codes), "generatedAt": "", "failed": []}
 
+    def cache_klines(self, codes, period="day", count=800, adjust="qfq", skip_existing=False):
+        return {
+            "codes": len(codes),
+            "period": period,
+            "count": count,
+            "adjust": adjust,
+            "skipExisting": skip_existing,
+        }
+
     def local_min_write(self, path, bars):
         return {"path": path, "count": len(bars)}
 
@@ -292,6 +301,26 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(
             [item["code"] for item in payload["result"]], ["sh600519", "sz000858"]
         )
+
+    def test_cache_klines_passes_skip_existing(self):
+        status, payload, _ = self.request(
+            "POST",
+            "/api/cache_klines",
+            {
+                "codes": ["sh600519"],
+                "period": "5s",
+                "count": 800,
+                "adjust": "none",
+                "skipExisting": True,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["result"]["skipExisting"])
+        status, payload, _ = self.request(
+            "POST", "/api/cache_klines", {"codes": ["sh600519"]}
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["result"]["skipExisting"])
 
     def test_f10_industry(self):
         status, payload, _ = self.request(

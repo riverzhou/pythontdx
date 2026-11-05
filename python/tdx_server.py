@@ -1628,6 +1628,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                             str(payload.get("period") or "day"),
                             int(payload.get("count") or 800),
                             str(payload.get("adjust") or "qfq"),
+                            bool(
+                                payload.get(
+                                    "skipExisting", payload.get("skip_existing", False)
+                                )
+                            ),
                         )
                     )
                 return
