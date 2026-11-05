@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -28,6 +30,42 @@ TQLEX_HOSTS = (
 # F10 这批 HTTP 接口坏掉，症状还很像「服务器慢」。显式传一个空的 ProxyHandler，
 # 保证三个平台行为一致，也避免把行情请求悄悄塞进与本项目无关的代理。
 _OPENER = build_opener(ProxyHandler({}))
+# 7615 正常响应 0.05~0.2 秒；主站故障时会「连上但很慢」（实测 4~5 秒），
+# 12 秒超时会把整个 HTTP API 队列拖住。2 秒只留 10 倍余量，失败就换站。
+TQLEX_TIMEOUT = 2.0
+# 失败网关冷却：主站挂掉后不再每个请求都白等一轮。
+TQLEX_COOLDOWN = 60.0
+_tqlex_lock = threading.Lock()
+_tqlex_cooldown: dict[str, float] = {}
+_tqlex_latency: dict[str, float] = {}
+_tqlex_last_good: str | None = None
+
+
+def _tqlex_bases() -> list[str]:
+    """按健康度排序网关：冷却中的排最后，其余按最近成功耗时升序。
+
+    主站可能「不超时但很慢」（实测 4~5 秒），只记 last_good 会永远优先选它；
+    按延迟排序能让 page2 这类 0.05 秒的网关自然顶上来。
+    """
+    with _tqlex_lock:
+        now = time.monotonic()
+        bases = [TQLEX_URL] + [host for host in TQLEX_HOSTS if host != TQLEX_URL]
+        healthy = [base for base in bases if _tqlex_cooldown.get(base, 0.0) <= now]
+        cooling = [base for base in bases if _tqlex_cooldown.get(base, 0.0) > now]
+        healthy.sort(key=lambda base: _tqlex_latency.get(base, 1.0))
+        return healthy + cooling
+
+
+def _mark_tqlex(base: str, ok: bool, seconds: float = 0.0) -> None:
+    """记录网关状态；失败耗时同样计入排序，冷却后不会排在健康站点前面。"""
+    global _tqlex_last_good
+    with _tqlex_lock:
+        _tqlex_latency[base] = seconds
+        if ok:
+            _tqlex_last_good = base
+            _tqlex_cooldown.pop(base, None)
+        else:
+            _tqlex_cooldown[base] = time.monotonic() + TQLEX_COOLDOWN
 ENTRY = "CWSearch.tzx_rcache"
 PROFILE_ENTRY = "CWServ.tdxf10_gg_gsgk"
 VALUATION_ENTRY = "HQServ.hq_nlp_gpsj"
@@ -231,45 +269,10 @@ def parse_business_payload(payload: dict) -> dict:
     return {"columns": columns, "rows": rows}
 
 
-def _post_tqlex(entry: str, body: dict) -> dict:
-    payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+def _tqlex_post(entry: str, data: bytes) -> dict:
+    """多网关 POST：按健康度依次尝试，成功/失败都记入网关状态。"""
     last_error: Exception | None = None
-    # TQLEX_URL 允许测试/部署覆盖；把它放在首位，其余网关去重后兜底。
-    bases = [TQLEX_URL] + [host for host in TQLEX_HOSTS if host != TQLEX_URL]
-    for base in bases:
-        request = Request(
-            f"{base}?Entry={entry}",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "pythontdx/1.0",
-            },
-            method="POST",
-        )
-        try:
-            with _OPENER.open(request, timeout=12) as response:
-                raw = response.read()
-        except (HTTPError, URLError, TimeoutError) as error:
-            last_error = error
-            continue
-        try:
-            parsed = json.loads(raw.decode("utf-8-sig"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            last_error = error
-            continue
-        if not isinstance(parsed, dict):
-            last_error = F10Error("7615 返回结构异常")
-            continue
-        return parsed
-    raise F10Error(f"7615 请求失败：{last_error}")
-
-
-def _post_tqlex_data(entry: str, data: bytes) -> dict:
-    """已编码 JSON 的多主机 POST（供自定义 body 的旧函数复用 failover）。"""
-    last_error: Exception | None = None
-    bases = [TQLEX_URL] + [host for host in TQLEX_HOSTS if host != TQLEX_URL]
-    for base in bases:
+    for base in _tqlex_bases():
         request = Request(
             f"{base}?Entry={entry}",
             data=data,
@@ -280,22 +283,38 @@ def _post_tqlex_data(entry: str, data: bytes) -> dict:
             },
             method="POST",
         )
+        started = time.monotonic()
         try:
-            with _OPENER.open(request, timeout=12) as response:
+            with _OPENER.open(request, timeout=TQLEX_TIMEOUT) as response:
                 raw = response.read()
         except (HTTPError, URLError, TimeoutError) as error:
+            _mark_tqlex(base, False, time.monotonic() - started)
             last_error = error
             continue
+        elapsed = time.monotonic() - started
         try:
             parsed = json.loads(raw.decode("utf-8-sig"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            _mark_tqlex(base, False, elapsed)
             last_error = error
             continue
         if not isinstance(parsed, dict):
+            _mark_tqlex(base, False, elapsed)
             last_error = F10Error("7615 返回结构异常")
             continue
+        _mark_tqlex(base, True, elapsed)
         return parsed
     raise F10Error(f"7615 请求失败：{last_error}")
+
+
+def _post_tqlex(entry: str, body: dict) -> dict:
+    payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    return _tqlex_post(entry, payload)
+
+
+def _post_tqlex_data(entry: str, data: bytes) -> dict:
+    """已编码 JSON 的多主机 POST（供自定义 body 的旧函数复用 failover）。"""
+    return _tqlex_post(entry, data)
 
 
 def parse_shareholder_payload(payload: dict) -> dict:

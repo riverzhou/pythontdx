@@ -1060,6 +1060,78 @@ class TestTqlexProxyBypass(unittest.TestCase):
             thread.join(timeout=5)
 
 
+class TestTqlexFailover(unittest.TestCase):
+    """7615 网关健康记忆：失败站点冷却，下次请求优先上次成功的网关。"""
+
+    class FakeResponse:
+        def __init__(self, body: bytes):
+            self.body = body
+
+        def read(self) -> bytes:
+            return self.body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class FakeOpener:
+        def __init__(self, fail_hosts: set[str]):
+            self.fail_hosts = fail_hosts
+            self.calls: list[str] = []
+
+        def open(self, request, timeout):
+            self.calls.append(request.full_url)
+            if any(host in request.full_url for host in self.fail_hosts):
+                raise TimeoutError("timeout")
+            return TestTqlexFailover.FakeResponse(b'{"ErrorCode":0}')
+
+    def setUp(self):
+        import tdx_f10
+
+        self.f10 = tdx_f10
+        self.saved_cooldown = dict(tdx_f10._tqlex_cooldown)
+        self.saved_latency = dict(tdx_f10._tqlex_latency)
+        self.saved_good = tdx_f10._tqlex_last_good
+        tdx_f10._tqlex_cooldown.clear()
+        tdx_f10._tqlex_latency.clear()
+        tdx_f10._tqlex_last_good = None
+
+    def tearDown(self):
+        self.f10._tqlex_cooldown.clear()
+        self.f10._tqlex_cooldown.update(self.saved_cooldown)
+        self.f10._tqlex_latency.clear()
+        self.f10._tqlex_latency.update(self.saved_latency)
+        self.f10._tqlex_last_good = self.saved_good
+
+    def test_fastest_host_is_tried_first(self):
+        hosts = self.f10._tqlex_bases()
+        slow, fast = hosts[0], hosts[1]
+        self.f10._mark_tqlex(slow, True, 5.0)
+        self.f10._mark_tqlex(fast, True, 0.05)
+        self.assertEqual(self.f10._tqlex_bases()[0], fast)
+
+    def test_failed_host_moves_to_back(self):
+        hosts = self.f10._tqlex_bases()
+        self.f10._mark_tqlex(hosts[0], False)
+        self.assertEqual(self.f10._tqlex_bases()[-1], hosts[0])
+
+    def test_cooled_host_is_skipped_on_next_request(self):
+        from unittest import mock
+
+        hosts = self.f10._tqlex_bases()
+        bad = hosts[0]
+        opener = self.FakeOpener({bad})
+        with mock.patch.object(self.f10, "_OPENER", opener):
+            self.assertEqual(self.f10._tqlex_post("Test", b"{}"), {"ErrorCode": 0})
+            self.assertEqual(opener.calls[0], f"{bad}?Entry=Test")
+            opener.calls.clear()
+            self.assertEqual(self.f10._tqlex_post("Test", b"{}"), {"ErrorCode": 0})
+        self.assertEqual(len(opener.calls), 1)
+        self.assertNotIn(bad, opener.calls[0])
+
+
 class TestDatasetWriter(unittest.TestCase):
     """Windows 上杀软/索引会短暂占用目标文件，原子改名必须重试。"""
 
