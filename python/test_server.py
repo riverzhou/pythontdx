@@ -145,6 +145,17 @@ class FakeBridge:
     def market_breadth(self):
         return {"up": 1, "down": 2, "flat": 3, "total": 6, "updatedAt": 0}
 
+    def market_breadth_page(self, start=0, pages=8):
+        return {
+            "up": 1,
+            "down": 2,
+            "flat": 3,
+            "limitUp": 1,
+            "limitDown": 0,
+            "nextStart": None,
+            "updatedAt": 0,
+        }
+
     def f10_change_plans(self, code):
         return {"columns": [], "rows": [], "count": 0}
 
@@ -329,6 +340,51 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["result"]["section"], "news")
         self.assertEqual(payload["result"]["count"], 1)
+
+    def test_market_breadth_pages_aggregate(self):
+        class PagedBridge(FakeBridge):
+            def __init__(self):
+                self.calls = []
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls.append((start, pages))
+                if start == 0:
+                    return {
+                        "up": 1,
+                        "down": 2,
+                        "flat": 3,
+                        "limitUp": 1,
+                        "limitDown": 0,
+                        "nextStart": 640,
+                        "updatedAt": 1,
+                    }
+                return {
+                    "up": 4,
+                    "down": 5,
+                    "flat": 6,
+                    "limitUp": 0,
+                    "limitDown": 1,
+                    "nextStart": None,
+                    "updatedAt": 2,
+                }
+
+        bridge = PagedBridge()
+        self.server.bridge = bridge
+        status, payload, _ = self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload["result"],
+            {
+                "up": 5,
+                "down": 7,
+                "flat": 9,
+                "limitUp": 1,
+                "limitDown": 1,
+                "total": 21,
+                "updatedAt": 2,
+            },
+        )
+        self.assertEqual([call[0] for call in bridge.calls], [0, 640])
 
     def test_f10_statement_full_flag(self):
         status, payload, _ = self.request(
