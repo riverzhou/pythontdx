@@ -78,15 +78,21 @@ class _Task:
 
 
 class SubscriptionHub:
-    """线程安全的订阅工厂；`fetch` 由调用方注入，便于测试不碰网络。"""
+    """线程安全的订阅工厂；`fetch` 由调用方注入，便于测试不碰网络。
+
+    `interval_for` 用于按时段调整实际轮询间隔：Web 端没有主进程 poller，
+    收盘/午休的降频由服务端统一处理，客户端仍按自己的 interval 声明订阅。
+    """
 
     def __init__(
         self,
         fetch: Callable[[list[str]], list[dict[str, Any]]],
         clock: Callable[[], float] = time.monotonic,
+        interval_for: Callable[[float], float] | None = None,
     ) -> None:
         self._fetch = fetch
         self._clock = clock
+        self._interval_for = interval_for or (lambda interval: interval)
         self._lock = threading.Lock()
         self._tasks: dict[tuple[int, tuple[str, ...]], _Task] = {}
         self._closed = False
@@ -165,7 +171,9 @@ class SubscriptionHub:
             "result": {"quotes": quotes, "at": int(time.time() * 1000)},
         }
         task.last_payload = payload
-        task.last_at = now
+        # 记录完成时刻而不是发起时刻：行情拉取本身可能超过基线新鲜度阈值，
+        # 否则轮询线程会误判基线已过期，紧接着再拉一次。
+        task.last_at = self._clock()
         subscription.push(payload)
 
     def _run(self, task: _Task) -> None:
@@ -178,7 +186,7 @@ class SubscriptionHub:
             ):
                 # 基线刚拉过，别立刻重复请求；等一个周期再进入常规轮询。
                 first_round = False
-                task.stop.wait(task.interval)
+                task.stop.wait(self._interval_for(task.interval))
                 continue
             first_round = False
             started = self._clock()
@@ -198,7 +206,7 @@ class SubscriptionHub:
                     task.last_at = self._clock()
             for subscription in subscribers:
                 subscription.push(payload)
-            remaining = task.interval - (self._clock() - started)
+            remaining = self._interval_for(task.interval) - (self._clock() - started)
             if remaining > 0:
                 task.stop.wait(remaining)
 

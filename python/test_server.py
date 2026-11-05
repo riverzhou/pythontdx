@@ -11,8 +11,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from tdx_server import create_server
+from tdx_server import _quote_interval, create_server
 
 
 class FakeBridge:
@@ -585,6 +586,22 @@ class TestHttpApi(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["result"]["quotes"][0]["code"], "sh600519")
         connection.close()
+
+
+class TestQuoteInterval(unittest.TestCase):
+    def test_trading_and_pre_open_keep_requested_interval(self):
+        for clock in (("10:00:00", "trading"), ("09:20:00", "pre-open")):
+            with patch("tdx_server.shanghai_clock", return_value=clock):
+                self.assertEqual(_quote_interval(1.0), 1.0)
+
+    def test_closed_scales_ten_times_with_thirty_second_floor(self):
+        with patch("tdx_server.shanghai_clock", return_value=("20:00:00", "closed")):
+            self.assertEqual(_quote_interval(1.0), 30.0)
+            self.assertEqual(_quote_interval(5.0), 50.0)
+
+    def test_lunch_break_also_scales(self):
+        with patch("tdx_server.shanghai_clock", return_value=("12:00:00", "lunch-break")):
+            self.assertEqual(_quote_interval(1.0), 30.0)
 
 
 class TestStaticWeb(unittest.TestCase):

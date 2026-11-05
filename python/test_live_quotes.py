@@ -9,7 +9,7 @@ from tdx_bridge import (
     _merge_quotes,
     _merge_snapshot_prices,
     _normalize_codes,
-    _shanghai_clock,
+    shanghai_clock,
 )
 
 
@@ -54,7 +54,7 @@ class FakeBridge:
 
 
 def live(bridge, codes, clock=("10:00:00", "trading")):
-    with patch("tdx_bridge._shanghai_clock", return_value=clock):
+    with patch("tdx_bridge.shanghai_clock", return_value=clock):
         return Bridge.live_quotes(bridge, codes)
 
 
@@ -125,7 +125,7 @@ class ClockTests(unittest.TestCase):
         from datetime import datetime
 
         def at(hour, minute, second=0):
-            return _shanghai_clock(
+            return shanghai_clock(
                 datetime(2026, 11, 5, hour, minute, second, tzinfo=_tz())
             )[1]
 

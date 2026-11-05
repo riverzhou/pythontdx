@@ -27,10 +27,26 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tdx_bridge import Bridge, TdxError
+from tdx_bridge import Bridge, TdxError, shanghai_clock
 from subscription_hub import SubscriptionHub
 
 MAX_BODY_BYTES = 1024 * 1024
+
+# 非交易时段的行情轮询下限：与桌面 QuotePoller 的规则保持一致
+IDLE_QUOTE_INTERVAL_SCALE = 10
+IDLE_QUOTE_MIN_SECONDS = 30.0
+
+
+def _quote_interval(interval: float) -> float:
+    """交易/竞价按订阅间隔；收盘后降到 10 倍、最少 30 秒。
+
+    Web 端没有主进程 poller，SSE/WebSocket 的轮询节奏由服务端统一收口，
+    否则每个标签页都会在收盘后继续按 1 秒空转。
+    """
+    _now, session = shanghai_clock()
+    if session in {"trading", "pre-open"}:
+        return interval
+    return max(interval * IDLE_QUOTE_INTERVAL_SCALE, IDLE_QUOTE_MIN_SECONDS)
 
 
 class TdxApiServer(ThreadingHTTPServer):
@@ -48,7 +64,8 @@ class TdxApiServer(ThreadingHTTPServer):
         self.lock = threading.Lock()
         self.web_dir = Path(web_dir).resolve() if web_dir else None
         # SSE/WebSocket 共享一个订阅 Hub：同一组代码只轮询一次，结果扇出。
-        self.hub = SubscriptionHub(self._fetch_quotes)
+        # 收盘/午休由 _quote_interval 统一降频，客户端无需感知。
+        self.hub = SubscriptionHub(self._fetch_quotes, interval_for=_quote_interval)
 
     def _fetch_quotes(self, codes: list[str]) -> list[dict]:
         # 与 Electron IPC、/api/quotes 共用同一套实时行情编排

@@ -35,11 +35,21 @@ function isLive(session: MarketSession): boolean {
   return session === 'trading' || session === 'pre-open'
 }
 
-/** 单主图：交易时段所有周期 1 秒；非交易时段降频。 */
-export function chartRefreshMs(_tab: ChartTab, session: MarketSession): number {
+/** 交易/竞价 1 秒；午休 30 秒；收盘后 60 秒（数据已不再变化）。 */
+function liveRefreshMs(session: MarketSession): number {
   if (isLive(session)) return 1000
   if (session === 'lunch-break') return 30_000
   return 60_000
+}
+
+/** 单主图：交易时段所有周期 1 秒；非交易时段降频。 */
+export function chartRefreshMs(_tab: ChartTab, session: MarketSession): number {
+  return liveRefreshMs(session)
+}
+
+/** 逐笔面板：收盘后逐笔不再变化，跟随主图一起降频。 */
+export function tapeRefreshMs(session: MarketSession): number {
+  return liveRefreshMs(session)
 }
 
 /** 多股同列：交易时段也是 1 秒；非交易时段统一 60 秒。 */

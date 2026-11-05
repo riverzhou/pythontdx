@@ -71,10 +71,42 @@ class TestSubscriptionHub(unittest.TestCase):
         hub.unsubscribe(sub)
         self.assertEqual(hub._tasks, {})
 
+    def test_slow_baseline_does_not_trigger_immediate_refetch(self):
+        calls: list[int] = []
+        lock = threading.Lock()
+
+        def fetch(codes):
+            with lock:
+                calls.append(1)
+            time.sleep(0.7)  # 超过基线新鲜度阈值
+            return [{"code": codes[0]}]
+
+        hub = SubscriptionHub(fetch)
+        sub = hub.subscribe(["sh600519"], 1000)
+        time.sleep(0.3)
+        hub.unsubscribe(sub)
+        self.assertEqual(len(calls), 1)
+
     def test_empty_codes_rejected(self):
         hub = SubscriptionHub(lambda codes: [])
         with self.assertRaises(ValueError):
             hub.subscribe([], 1000)
+
+    def test_interval_for_scales_polling(self):
+        calls: list[float] = []
+        lock = threading.Lock()
+
+        def fetch(codes):
+            with lock:
+                calls.append(time.monotonic())
+            return [{"code": codes[0]}]
+
+        # 100ms 的订阅在「休市」被放大 5 倍：0.35 秒内只应拉一次
+        hub = SubscriptionHub(fetch, interval_for=lambda interval: interval * 5)
+        sub = hub.subscribe(["sh600519"], 100, baseline=False)
+        time.sleep(0.35)
+        hub.unsubscribe(sub)
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

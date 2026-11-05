@@ -387,7 +387,7 @@ OPENING_GRACE_UNTIL = "09:30:10"
 AUCTION_FALLBACK_LIMIT = 80
 
 
-def _shanghai_clock(now: datetime | None = None) -> tuple[str, str]:
+def shanghai_clock(now: datetime | None = None) -> tuple[str, str]:
     """返回 (北京时间 HH:MM:SS, 交易时段)，时段划分与前端 shanghaiClock 一致。
 
     只判断工作日/盘中时段，不含法定节假日；节假日按「已收盘」处理。
@@ -4840,7 +4840,7 @@ class Bridge:
         if not unique:
             return []
 
-        now, session = _shanghai_clock()
+        now, session = shanghai_clock()
         pre_open = session == "pre-open"
         opening_window = pre_open or (
             session == "trading" and now <= OPENING_GRACE_UNTIL
