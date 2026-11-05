@@ -76,6 +76,7 @@ import type { ChartPatternsRequest, ChartPatternsResult } from '@shared/patterns
 import type { CategoryRequest, TradesRequest } from '@shared/ipc'
 import { fetchLiveKline, type LiveKlineState } from '@shared/kline-live'
 import { splitCode } from '@shared/market'
+import { createBreadthLoader } from './breadth'
 import { TtlCache } from '../cache'
 import { CODE_LIST_TIMEOUT_MS, QUOTES_TIMEOUT_MS, TdxBridge, TdxError } from './bridge'
 import { buildSearchEntries, searchEntries, type SearchEntry, type SearchSecurity } from './search'
@@ -414,7 +415,7 @@ interface BreadthPage {
  * 涨跌家数按页扫：每 8 页（640 只）发一次请求，页间让 priority 的图表请求
  * 插队。整包扫描会独占串行 sidecar 5~7 秒，期间切股票/切分时都要等。
  */
-export async function fetchMarketBreadth(): Promise<MarketBreadth> {
+async function scanMarketBreadth(): Promise<MarketBreadth> {
   let start = 0
   let up = 0
   let down = 0
@@ -443,6 +444,13 @@ export async function fetchMarketBreadth(): Promise<MarketBreadth> {
     start = page.nextStart
   }
   throw new TdxError('涨跌家数分页异常')
+}
+
+// 按时段缓存：交易 15 秒、午休 120 秒、收盘 300 秒，跨日失效。
+const loadBreadthCached = createBreadthLoader()
+
+export async function fetchMarketBreadth(): Promise<MarketBreadth> {
+  return loadBreadthCached(scanMarketBreadth)
 }
 
 const DATA_TIMEOUT_MS = 180_000

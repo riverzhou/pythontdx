@@ -15,7 +15,12 @@ export class TtlCache<T> {
   /** 在途请求：同一个 key 的并发调用共享同一个 Promise */
   private readonly pending = new Map<string, Promise<T>>()
 
-  constructor(private readonly ttlMs: number) {}
+  /** 固定时长，或按当前时段动态计算（写入时求值） */
+  constructor(private readonly ttl: number | (() => number)) {}
+
+  private ttlMs(): number {
+    return typeof this.ttl === 'function' ? this.ttl() : this.ttl
+  }
 
   get(key: string): T | undefined {
     const hit = this.store.get(key)
@@ -28,7 +33,7 @@ export class TtlCache<T> {
   }
 
   set(key: string, value: T): T {
-    this.store.set(key, { value, expiresAt: Date.now() + this.ttlMs })
+    this.store.set(key, { value, expiresAt: Date.now() + this.ttlMs() })
     return value
   }
 
