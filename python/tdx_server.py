@@ -402,6 +402,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                             query.get("adjust", "qfq"),
                             query.get("cacheOnly") in {"1", "true", "yes"},
                             query.get("anchorDate") or None,
+                            int(query.get("start", "0")),
                         )
                     )
                 return

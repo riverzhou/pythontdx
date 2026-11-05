@@ -7235,12 +7235,14 @@ class Bridge:
         adjust: str = 'qfq',
         cache_only: bool = False,
         anchor_date: str | None = None,
+        start: int = 0,
     ) -> dict:
         market, symbol = parse_code(code)
         if period not in PERIOD_RAW:
             raise TdxError("K 线周期只支持 day / week / month")
 
         safe_count = max(1, min(800, int(count)))
+        safe_start = max(0, int(start))
         requested_adjust = str(adjust or "qfq")
         fixed = requested_adjust in {"fixed_qfq", "fixed_hfq"}
         if fixed and not anchor_date:
@@ -7255,6 +7257,8 @@ class Bridge:
         cache_adjust = f"{safe_adjust}@{anchor_raw}" if fixed else safe_adjust
         kind = "index" if is_index_code(market, symbol) else "stock"
         if cache_only:
+            if safe_start:
+                raise TdxError("cache_only 只支持 start=0（分页请求不落缓存）")
             cached = _read_kline_cache(code, period, safe_count, cache_adjust)
             if cached is not None:
                 return cached
@@ -7289,22 +7293,26 @@ class Bridge:
                     PERIOD_RAW[period],
                     safe_count,
                     {'none': 0, 'qfq': 1, 'hfq': 2, 'fixed_qfq': 3, 'fixed_hfq': 4}.get(safe_adjust, 1),
-                    0,
+                    safe_start,
                     {'5s': 5, '15s': 15, '2m': 2, '3m': 3, '4m': 4, '6m': 6, '8m': 8, '10m': 10, '12m': 12, '18m': 18, '20m': 20, '24m': 24, '36m': 36, '48m': 48, '2d': 2, '3d': 3, '4d': 4, '6d': 6, '9d': 9, '12d': 12, '18d': 18, '24d': 24, '45d': 45}.get(period, 1),
                     anchor_raw,
                 ),
             )
             bars = parse_bars(body, kind, PERIOD_RAW[period])
-            _write_kline_cache(code, period, safe_count, cache_adjust, bars, "network")
+            if not safe_start:
+                _write_kline_cache(code, period, safe_count, cache_adjust, bars, "network")
             return {
                 "code": code,
                 "period": period,
                 "bars": bars,
+                "start": safe_start,
                 "source": "7709",
                 "adjust": safe_adjust,
                 "anchorDate": anchor_date if fixed else None,
             }
         except Exception:
+            if safe_start:
+                raise
             cached = _read_kline_cache(code, period, safe_count, cache_adjust)
             if cached is not None:
                 return cached
