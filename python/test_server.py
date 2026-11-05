@@ -330,6 +330,20 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(payload["result"]["section"], "news")
         self.assertEqual(payload["result"]["count"], 1)
 
+    def test_f10_statement_full_flag(self):
+        status, payload, _ = self.request(
+            "POST",
+            "/api/f10_statement",
+            {"code": "sh600519", "kind": "zcfzb", "full": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["result"]["full"])
+        status, payload, _ = self.request(
+            "POST", "/api/f10_statement", {"code": "sh600519", "kind": "zcfzb"}
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["result"]["full"])
+
     def test_category_and_trades(self):
         status, payload, _ = self.request(
             "POST", "/api/category", {"category": 6, "sortType": 14}

@@ -450,7 +450,8 @@ export function createHttpApi(): PythonTdxApi {
       institutions: (code) => post<F10ProfileTable>('/api/f10_institutions', { code }),
       controller: (code) => post<F10ProfileTable>('/api/f10_controller', { code }),
       changePlans: (code) => post<F10ProfileTable>('/api/f10_change_plans', { code }),
-      statement: (code, kind) => post<F10ProfileTable>('/api/f10_statement', { code, kind })
+      statement: (code, kind, full) =>
+        post<F10ProfileTable>('/api/f10_statement', { code, kind, full: full ?? false })
     },
     data: {
       statsSummary: () => post<TdxStatsSummary>('/api/stats_summary', {}),
