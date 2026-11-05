@@ -21,13 +21,14 @@ import mimetypes
 import sys
 import threading
 import time
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tdx_bridge import Bridge, TdxError, shanghai_clock
+from tdx_bridge import SHANGHAI_TZ, Bridge, TdxError, shanghai_clock
 from subscription_hub import SubscriptionHub
 
 MAX_BODY_BYTES = 1024 * 1024
@@ -49,6 +50,28 @@ def _quote_interval(interval: float) -> float:
     return max(interval * IDLE_QUOTE_INTERVAL_SCALE, IDLE_QUOTE_MIN_SECONDS)
 
 
+# 涨跌家数整轮扫描要 70 次 0x054b 往返：交易时段对齐前端 30 秒轮询，
+# 午休与收盘后数据不变，直接复用缓存。
+BREADTH_TRADING_TTL = 15.0
+BREADTH_LUNCH_TTL = 120.0
+BREADTH_CLOSED_TTL = 300.0
+
+
+def _breadth_ttl() -> float:
+    """涨跌家数缓存时长，按时段区分。"""
+    _now, session = shanghai_clock()
+    if session in {"trading", "pre-open"}:
+        return BREADTH_TRADING_TTL
+    if session == "lunch-break":
+        return BREADTH_LUNCH_TTL
+    return BREADTH_CLOSED_TTL
+
+
+def _shanghai_day() -> str:
+    """缓存跨日失效：收盘缓存不能带到下一个交易日。"""
+    return datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d")
+
+
 class TdxApiServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -62,6 +85,12 @@ class TdxApiServer(ThreadingHTTPServer):
         super().__init__(address, ApiHandler)
         self.bridge = bridge
         self.lock = threading.Lock()
+        # 涨跌家数缓存：single-flight 让多个标签页共享同一轮扫描。
+        # 锁顺序固定为 breadth_lock -> lock，避免与分页扫描互锁。
+        self.breadth_lock = threading.Lock()
+        self.breadth_cache: dict | None = None
+        self.breadth_at = 0.0
+        self.breadth_day = ""
         self.web_dir = Path(web_dir).resolve() if web_dir else None
         # SSE/WebSocket 共享一个订阅 Hub：同一组代码只轮询一次，结果扇出。
         # 收盘/午休由 _quote_interval 统一降频，客户端无需感知。
@@ -71,6 +100,56 @@ class TdxApiServer(ThreadingHTTPServer):
         # 与 Electron IPC、/api/quotes 共用同一套实时行情编排
         with self.lock:
             return self.bridge.live_quotes(codes)
+
+    def market_breadth(self) -> dict:
+        """带缓存的全市场涨跌家数。
+
+        扫描本身要 70 次往返；缓存命中时直接返回，交易时段 TTL 15 秒与前端
+        30 秒轮询对齐，午休 120 秒、收盘 300 秒，跨日强制失效。
+        """
+        with self.breadth_lock:
+            now = time.monotonic()
+            day = _shanghai_day()
+            cached = self.breadth_cache
+            if cached is not None and self.breadth_day == day:
+                if now - self.breadth_at < _breadth_ttl():
+                    return cached
+            value = self._scan_breadth()
+            self.breadth_cache = value
+            self.breadth_at = time.monotonic()
+            self.breadth_day = day
+            return value
+
+    def _scan_breadth(self) -> dict:
+        """分页扫描全 A 股涨跌家数。
+
+        每页重新加锁，图表/逐笔请求可以在页与页之间插队。
+        """
+        start = 0
+        up = down = flat = limit_up = limit_down = 0
+        updated_at = 0
+        for _ in range(200):
+            with self.lock:
+                page = self.bridge.market_breadth_page(start, 8)
+            up += int(page.get("up") or 0)
+            down += int(page.get("down") or 0)
+            flat += int(page.get("flat") or 0)
+            limit_up += int(page.get("limitUp") or 0)
+            limit_down += int(page.get("limitDown") or 0)
+            updated_at = int(page.get("updatedAt") or updated_at)
+            next_start = page.get("nextStart")
+            if next_start is None:
+                return {
+                    "up": up,
+                    "down": down,
+                    "flat": flat,
+                    "limitUp": limit_up,
+                    "limitDown": limit_down,
+                    "total": up + down + flat,
+                    "updatedAt": updated_at,
+                }
+            start = int(next_start)
+        raise TdxError("涨跌家数分页异常")
 
     def server_close(self) -> None:
         try:
@@ -261,38 +340,6 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def _ok(self, result: Any) -> None:
         self._json(HTTPStatus.OK, {"ok": True, "result": result})
-
-    def _market_breadth(self) -> dict:
-        """分页扫描全 A 股涨跌家数。
-
-        整包扫描会独占 bridge 锁 5~7 秒；这里每页重新加锁，图表/逐笔请求
-        可以在页与页之间插队。分页参数与桌面 fetchMarketBreadth 一致。
-        """
-        start = 0
-        up = down = flat = limit_up = limit_down = 0
-        updated_at = 0
-        for _ in range(200):
-            with self.server.lock:
-                page = self.server.bridge.market_breadth_page(start, 8)
-            up += int(page.get("up") or 0)
-            down += int(page.get("down") or 0)
-            flat += int(page.get("flat") or 0)
-            limit_up += int(page.get("limitUp") or 0)
-            limit_down += int(page.get("limitDown") or 0)
-            updated_at = int(page.get("updatedAt") or updated_at)
-            next_start = page.get("nextStart")
-            if next_start is None:
-                return {
-                    "up": up,
-                    "down": down,
-                    "flat": flat,
-                    "limitUp": limit_up,
-                    "limitDown": limit_down,
-                    "total": up + down + flat,
-                    "updatedAt": updated_at,
-                }
-            start = int(next_start)
-        raise TdxError("涨跌家数分页异常")
 
     def _stream(self, query: dict[str, str]) -> None:
         """SSE 行情流：先落地推送语义，避免 Web 端只能 3 秒轮询。"""
@@ -1741,8 +1788,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                     )
                 return
             if parsed.path == "/api/market_breadth":
-                # 分页调用：每页结束释放锁，图表/逐笔请求可以在页间插队
-                self._ok(self._market_breadth())
+                # 缓存在 server 上：多标签共享一轮扫描，按时段调整 TTL
+                self._ok(self.server.market_breadth())
                 return
             if parsed.path == "/api/f10_change_plans":
                 with self.server.lock:

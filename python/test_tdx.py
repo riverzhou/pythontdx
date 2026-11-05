@@ -1103,6 +1103,14 @@ class TestMarketBreadthPage(unittest.TestCase):
             "low": 9.0,
         }
 
+    def test_page_skips_finance_attachment(self) -> None:
+        bridge = tdx.Bridge()
+        calls: list[dict] = []
+        bridge.category_quotes = lambda **kwargs: calls.append(kwargs) or []
+        bridge.market_breadth_page(start=0, pages=1)
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(calls[0]["with_finance"])
+
     def test_page_reports_next_start_and_counts(self) -> None:
         bridge = tdx.Bridge()
         pages = {

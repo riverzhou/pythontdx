@@ -5042,8 +5042,13 @@ class Bridge:
         count: int = 80,
         ascending: bool = False,
         filter_raw: int = 0,
+        with_finance: bool = True,
     ) -> list[dict]:
-        """0x054b 分类行情：服务端排序，一页最多 80 条；category=6 沪深 A 股。"""
+        """0x054b 分类行情：服务端排序，一页最多 80 条；category=6 沪深 A 股。
+
+        `with_finance=False` 跳过市盈率等财务附加，只给涨跌家数这类纯统计用：
+        财务要额外 0x0010 往返，5000+ 只会让整轮扫描慢一倍。
+        """
         received_at = int(time.time() * 1000)
         try:
             self.index.ensure(self.conn)
@@ -5061,7 +5066,8 @@ class Bridge:
             ),
         )
         quotes = parse_category_quotes(body, received_at, self.index.by_code)
-        self._attach_finance(quotes)
+        if with_finance:
+            self._attach_finance(quotes)
         return quotes
 
     def category_snapshot(
@@ -5112,7 +5118,7 @@ class Bridge:
             pythontdx_data_dir() / "lake" / "category_quotes", limit
         )
 
-    def _all_category_quotes(self) -> list[dict]:
+    def _all_category_quotes(self, with_finance: bool = True) -> list[dict]:
         if self.screen_cache and self.screen_cache[0] > time.time():
             return self.screen_cache[1]
         quotes: list[dict] = []
@@ -5123,6 +5129,7 @@ class Bridge:
                 sort_type=0x000E,
                 start=start,
                 count=80,
+                with_finance=with_finance,
             )
             quotes.extend(page)
             if len(page) < 80:
@@ -5303,7 +5310,7 @@ class Bridge:
 
     def market_breadth(self) -> dict:
         """全 A 股涨跌家数（不含指数/基金）。"""
-        quotes = self._all_category_quotes()
+        quotes = self._all_category_quotes(with_finance=False)
         return {
             **self._breadth_counts(quotes),
             "updatedAt": int(time.time() * 1000),
@@ -5329,6 +5336,7 @@ class Bridge:
                 sort_type=0x000E,
                 start=start,
                 count=80,
+                with_finance=False,
             )
             if not page:
                 done = True

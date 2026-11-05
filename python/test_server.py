@@ -13,7 +13,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tdx_server import _quote_interval, create_server
+from tdx_server import (
+    BREADTH_CLOSED_TTL,
+    BREADTH_LUNCH_TTL,
+    BREADTH_TRADING_TTL,
+    _breadth_ttl,
+    _quote_interval,
+    create_server,
+)
 
 
 class FakeBridge:
@@ -387,6 +394,58 @@ class TestHttpApi(unittest.TestCase):
         )
         self.assertEqual([call[0] for call in bridge.calls], [0, 640])
 
+    def test_market_breadth_cached_within_ttl(self):
+        class CountingBridge(FakeBridge):
+            def __init__(self):
+                self.calls = 0
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls += 1
+                return super().market_breadth_page(start, pages)
+
+        bridge = CountingBridge()
+        self.server.bridge = bridge
+        with patch("tdx_server._breadth_ttl", return_value=60.0):
+            self.request("POST", "/api/market_breadth", {})
+            status, payload, _ = self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["total"], 6)
+        self.assertEqual(bridge.calls, 1)
+
+    def test_market_breadth_rescans_after_ttl(self):
+        class CountingBridge(FakeBridge):
+            def __init__(self):
+                self.calls = 0
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls += 1
+                return super().market_breadth_page(start, pages)
+
+        bridge = CountingBridge()
+        self.server.bridge = bridge
+        with patch("tdx_server._breadth_ttl", return_value=0.0):
+            self.request("POST", "/api/market_breadth", {})
+            self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(bridge.calls, 2)
+
+    def test_market_breadth_rescans_on_new_day(self):
+        class CountingBridge(FakeBridge):
+            def __init__(self):
+                self.calls = 0
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls += 1
+                return super().market_breadth_page(start, pages)
+
+        bridge = CountingBridge()
+        self.server.bridge = bridge
+        with patch("tdx_server._breadth_ttl", return_value=600.0):
+            with patch("tdx_server._shanghai_day", return_value="2026-11-05"):
+                self.request("POST", "/api/market_breadth", {})
+            with patch("tdx_server._shanghai_day", return_value="2026-11-06"):
+                self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(bridge.calls, 2)
+
     def test_f10_statement_full_flag(self):
         status, payload, _ = self.request(
             "POST",
@@ -602,6 +661,20 @@ class TestQuoteInterval(unittest.TestCase):
     def test_lunch_break_also_scales(self):
         with patch("tdx_server.shanghai_clock", return_value=("12:00:00", "lunch-break")):
             self.assertEqual(_quote_interval(1.0), 30.0)
+
+
+class TestBreadthTtl(unittest.TestCase):
+    def test_ttl_by_session(self):
+        cases = (
+            (("10:00:00", "trading"), BREADTH_TRADING_TTL),
+            (("09:20:00", "pre-open"), BREADTH_TRADING_TTL),
+            (("12:00:00", "lunch-break"), BREADTH_LUNCH_TTL),
+            (("20:00:00", "closed"), BREADTH_CLOSED_TTL),
+            (("10:00:00", "weekend"), BREADTH_CLOSED_TTL),
+        )
+        for clock, expected in cases:
+            with patch("tdx_server.shanghai_clock", return_value=clock):
+                self.assertEqual(_breadth_ttl(), expected)
 
 
 class TestStaticWeb(unittest.TestCase):
