@@ -22,6 +22,9 @@ class FakeBridge:
     def quotes(self, codes):
         return [{"code": code} for code in codes]
 
+    def live_quotes(self, codes):
+        return [{"code": code} for code in codes]
+
     def code_list(self):
         return [{"code": "sh600519"}]
 

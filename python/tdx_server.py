@@ -51,8 +51,9 @@ class TdxApiServer(ThreadingHTTPServer):
         self.hub = SubscriptionHub(self._fetch_quotes)
 
     def _fetch_quotes(self, codes: list[str]) -> list[dict]:
+        # 与 Electron IPC、/api/quotes 共用同一套实时行情编排
         with self.lock:
-            return self.bridge.quotes(codes)
+            return self.bridge.live_quotes(codes)
 
     def server_close(self) -> None:
         try:
@@ -653,7 +654,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if not isinstance(codes, list):
                     raise TdxError("codes 必须是数组")
                 with self.server.lock:
-                    self._ok(self.server.bridge.quotes(codes))
+                    self._ok(self.server.bridge.live_quotes(codes))
                 return
             if parsed.path == "/api/category":
                 with self.server.lock:
