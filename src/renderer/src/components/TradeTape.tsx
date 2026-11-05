@@ -1,23 +1,25 @@
 /**
  * 成交明细（0x0fc5 当日 / 0x0fc6 历史）。
  *
- * 默认每 1 秒拉当日最近 60 笔；选历史日期后停轮询，改查 0x0fc6。
+ * 交易时段每 1 秒拉当日最近 60 笔，午休 30 秒、收盘后 60 秒；选历史日期后停轮询，改查 0x0fc6。
  * 竞价快照（status=8）不是成交，弱化显示，不参与金额。
  */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
 import { Portal } from 'solid-js/web'
+import { marketSession } from '@shared/market'
 import type { TradeTick } from '@shared/types'
 import { fixed, thousands } from '@shared/format'
 import { mergeTickPage } from '@shared/trades'
 import { api, errorMessage } from '../lib/ipc'
 import { subscribePush } from '../lib/push'
+import { tapeRefreshMs } from '../lib/realtime'
+import { clockNow } from '../stores/clock'
 
 interface TradeTapeProps {
   code: string
 }
 
 const PAGE_SIZE = 60
-const REFRESH_MS = 1000
 
 function TickList(props: {
   rows: TradeTick[]
@@ -100,6 +102,9 @@ export function TradeTape(props: TradeTapeProps): JSX.Element {
   let requestId = 0
   let liveDispose: (() => void) | undefined
   const rows = createMemo(() => [...ticks()].reverse())
+  // 收盘后逐笔不再变化：跟随主图从 1 秒降到 60 秒，避免空转请求。
+  const liveSession = createMemo(() => marketSession(new Date(clockNow())))
+  const refreshMs = createMemo(() => tapeRefreshMs(liveSession()))
 
   const isTyping = (event: KeyboardEvent): boolean => {
     const target = event.target as HTMLElement | null
@@ -179,20 +184,27 @@ export function TradeTape(props: TradeTapeProps): JSX.Element {
     }
   }
 
+  let lastKey = ''
   createEffect(() => {
     const code = props.code
     const tradingDate = date()
+    const intervalMs = refreshMs()
+    // 只有代码/日期变化才重置交互状态；收盘降频重建订阅时保留用户选择。
+    const key = `${code}@${tradingDate}`
+    if (key !== lastKey) {
+      lastKey = key
+      setExpanded(false)
+      setLarge(false)
+      setSelected(-1)
+    }
     liveDispose?.()
     liveDispose = undefined
-    setExpanded(false)
-    setLarge(false)
-    setSelected(-1)
     if (tradingDate) {
       void load(code, tradingDate, 0)
     } else {
       liveDispose = subscribePush<TradeTick[]>(
         { kind: 'ticks', code, start: 0, count: PAGE_SIZE },
-        REFRESH_MS,
+        intervalMs,
         (data) => {
           setTicks(data)
           setHasMore(data.length === PAGE_SIZE)
@@ -315,7 +327,9 @@ export function TradeTape(props: TradeTapeProps): JSX.Element {
       >
         <div class="tape__meta">
           <span>{ticks().length} 笔</span>
-          <span>{expanded() ? '已展开' : date() ? '历史' : '每 1 秒'}</span>
+          <span>
+            {expanded() ? '已展开' : date() ? '历史' : `每 ${Math.round(refreshMs() / 1000)} 秒`}
+          </span>
         </div>
 
         <div class="tape__toolbar">

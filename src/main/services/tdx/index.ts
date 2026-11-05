@@ -74,7 +74,9 @@ import type {
 } from '@shared/types'
 import type { ChartPatternsRequest, ChartPatternsResult } from '@shared/patterns'
 import type { CategoryRequest, TradesRequest } from '@shared/ipc'
-import { shanghaiClock, splitCode } from '@shared/market'
+import { fetchLiveKline, type LiveKlineState } from '@shared/kline-live'
+import { splitCode } from '@shared/market'
+import { createBreadthLoader } from './breadth'
 import { TtlCache } from '../cache'
 import { CODE_LIST_TIMEOUT_MS, QUOTES_TIMEOUT_MS, TdxBridge, TdxError } from './bridge'
 import { buildSearchEntries, searchEntries, type SearchEntry, type SearchSecurity } from './search'
@@ -82,21 +84,15 @@ import type { SecurityInfo } from './types'
 
 const bridge = new TdxBridge()
 
-/** 单次行情刷新上限：超过就重启 sidecar，避免一条卡住的请求堵住整个界面 */
-const REFRESH_TIMEOUT_MS = 5_000
+/** 实时行情一次编排内部最多串行 4 个 7709 请求，总时长要给足 */
+const LIVE_QUOTES_TIMEOUT_MS = 35_000
 
 const minuteCache = new TtlCache<MinuteTrend>(10_000)
 const fiveDayCache = new TtlCache<MultiDayTrend>(60_000)
 const klineCache = new TtlCache<KLineSeries>(60_000)
 
-/** 实时 K 线：首帧全量，之后每秒只取最近 20 根；每分钟补一次全量防断层 */
-const KLINE_TAIL_COUNT = 20
-const KLINE_FULL_REFRESH_MS = 60_000
-interface LiveKlineEntry {
-  series: KLineSeries
-  fullAt: number
-}
-const liveKlineCache = new Map<string, LiveKlineEntry>()
+/** 实时 K 线的增量策略与 Web 共用，见 @shared/kline-live */
+const liveKlineCache = new Map<string, LiveKlineState>()
 
 interface CodeIndex {
   byCode: Map<string, SecurityInfo>
@@ -145,198 +141,20 @@ function normalizeCodes(codes: readonly string[]): string[] {
   return [...new Set(codes.map((code) => code.trim().toLowerCase()).filter(Boolean))]
 }
 
-function mergeQuotes(base: Quote[], incoming: Quote[]): Quote[] {
-  const byCode = new Map(base.map((quote) => [quote.code, quote]))
-  for (const quote of incoming) byCode.set(quote.code, quote)
-  return [...byCode.values()]
-}
-
-/**
- * 盘中：0x054c 快照负责「价格新鲜度」，0x0547 负责五档/内外盘/更新时间。
- *
- * 实测当前免费主站的 0x0547 增量约 3 秒才推一次新价，但 0x054c 快照约 1 秒
- * 就能拿到新价；用户要求价格必须 1 秒级。这里用快照覆盖价格/量/额等会变的字段，
- * 保留 0x0547 的五档深度；`updateTime` 置空，让界面显示「接收时间」而不是
- * 一个比价格慢 3 秒的交易所时间。
- */
-/**
- * 竞价兜底：0x056a 的虚拟撮合价覆盖价格/时间，但尽量保留快照/刷新里的
- * 昨收、开高低、五档与成交量，避免左侧栏只剩一个孤立价格。
- */
-function mergeAuctionQuotes(base: Quote[], auctions: Quote[]): Quote[] {
-  const byCode = new Map(base.map((quote) => [quote.code, quote]))
-  for (const auction of auctions) {
-    const existing = byCode.get(auction.code)
-    if (!existing) {
-      byCode.set(auction.code, auction)
-      continue
-    }
-    const prevClose = auction.prevClose > 0 ? auction.prevClose : existing.prevClose
-    const price = auction.price > 0 ? auction.price : existing.price
-    const change = prevClose > 0 ? price - prevClose : existing.change
-    const high = Math.max(
-      existing.high > 0 ? existing.high : price,
-      auction.high > 0 ? auction.high : price
-    )
-    const low = Math.min(
-      existing.low > 0 ? existing.low : price,
-      auction.low > 0 ? auction.low : price
-    )
-    byCode.set(auction.code, {
-      ...existing,
-      ...auction,
-      price,
-      prevClose,
-      open: existing.open > 0 ? existing.open : auction.open,
-      high,
-      low,
-      change,
-      changePct: prevClose > 0 ? (change / prevClose) * 100 : existing.changePct,
-      volume: existing.volume > 0 ? existing.volume : auction.volume,
-      amount: existing.amount > 0 ? existing.amount : auction.amount,
-      bids: existing.bids.length > 0 ? existing.bids : auction.bids,
-      asks: existing.asks.length > 0 ? existing.asks : auction.asks,
-      auction: true,
-      auctionTime: auction.auctionTime
-    })
-  }
-  return [...byCode.values()]
-}
-
-function mergeSnapshotPrices(snapshots: Quote[], refreshed: Quote[]): Quote[] {
-  if (snapshots.length === 0) return refreshed
-  if (refreshed.length === 0) return snapshots
-  const byCode = new Map(refreshed.map((quote) => [quote.code, quote]))
-  for (const snapshot of snapshots) {
-    const base = byCode.get(snapshot.code)
-    if (!base) {
-      byCode.set(snapshot.code, snapshot)
-      continue
-    }
-    const prevClose = snapshot.prevClose > 0 ? snapshot.prevClose : base.prevClose
-    const price = snapshot.price > 0 ? snapshot.price : base.price
-    const change = prevClose > 0 ? price - prevClose : base.change
-    const high = Math.max(snapshot.high > 0 ? snapshot.high : price, base.high)
-    const low = Math.min(snapshot.low > 0 ? snapshot.low : price, base.low > 0 ? base.low : price)
-    const volume = Math.max(snapshot.volume, base.volume)
-    const amount = Math.max(snapshot.amount, base.amount)
-    byCode.set(snapshot.code, {
-      ...base,
-      price,
-      prevClose,
-      open: snapshot.open > 0 ? snapshot.open : base.open,
-      high,
-      low,
-      change,
-      changePct: prevClose > 0 ? (change / prevClose) * 100 : base.changePct,
-      volume,
-      amount,
-      avgPrice: volume > 0 && amount > 0 ? amount / (volume * 100) : base.avgPrice,
-      amplitude: prevClose > 0 ? ((high - low) / prevClose) * 100 : base.amplitude,
-      time: snapshot.time,
-      receivedAt: snapshot.receivedAt,
-      // 快照没有交易所 updateTime；不要拿 0x0547 的旧时间冒充这一帧
-      updateTime: undefined
-    })
-  }
-  return [...byCode.values()]
-}
-
 /**
  * 批量拉取实时行情。
  *
- * 主链路 0x0547：Python 侧首次游标 0 建基线，后续用每只代码的 updateTime 推进；
- * 没有新成交时服务端返回 0 条，Python 会复用上一帧，所以不会触发 MAC 兜底。
- *
- * 集合竞价（09:15–09:30）单独走 0x054c 批量快照：0x0547 是增量接口，
- * 没有撮合/没有新记录的代码在竞价阶段可能一直返回 0 条（科创板最明显），
- * 行情头就会停在昨收。0x054c 是无游标的完整快照，正好补这一段。
- * 快照失败或不足时仍回退 0x0547，不改变盘中主链路。
- *
- * 0x053e 保留兼容/差分；港股/美股由 Python 侧过滤。
+ * 编排（0x054c 快照 → 0x0547 增量 → 合并 → 竞价兜底 → MAC 兜底）统一在
+ * `Bridge.live_quotes` 内完成，Electron IPC / HTTP / SSE / WebSocket 共用一份，
+ * 避免两边各写一套合并逻辑后漂移。这里只负责去重、取消检查与透传。
  */
 export async function fetchQuotes(codes: string[], signal?: AbortSignal): Promise<Quote[]> {
   const unique = normalizeCodes(codes)
   if (unique.length === 0) return []
   if (signal?.aborted) throw new TdxError('请求已取消')
 
-  const clock = shanghaiClock()
-  const preOpen = clock.session === 'pre-open'
-  /*
-   * 09:30:00–09:30:10 也走快照：0x0547 在开盘第一秒可能还没有可用的增量记录，
-   * 而用户要求第一秒就看到开盘价/分时线。过了这 10 秒立刻回到盘中主链路。
-   */
-  const openingGrace = clock.session === 'trading' && clock.time <= '09:30:10'
-  const openingWindow = preOpen || openingGrace
-  let snapshots: Quote[]
-  try {
-    // 行情是全局 1 秒主时钟：必须插队，不能被图表/逐笔的 priority 请求饿死
-    snapshots = await bridge.send<Quote[]>('snapshots', { codes: unique }, 15_000, true)
-  } catch (error) {
-    if (signal?.aborted) throw error
-    snapshots = []
-  }
-
-  let refreshed: Quote[] = []
-  if (!openingWindow || snapshots.length < unique.length) {
-    try {
-      refreshed = await bridge.send<Quote[]>('refresh', { codes: unique }, REFRESH_TIMEOUT_MS, true)
-    } catch (error) {
-      if (signal?.aborted) throw error
-      // 保持已有快照，下面走 MAC 兜底
-    }
-  }
-
-  let quotes = openingWindow
-    ? // 竞价/开盘首秒快照优先：0x0547 的缓存帧可能是昨收或更早的竞价值
-      mergeQuotes(refreshed, snapshots)
-    : mergeSnapshotPrices(snapshots, refreshed)
-
-  /*
-   * 左侧栏兜底：竞价阶段 0x054c/0x0547 对部分代码（科创板尤其明显）可能
-   * 只给昨收甚至完全没有记录。自选 <=80 只时全部取一次 0x056a 最后一根，
-   * 超过 80 只只补缺失/价格为 0 的，避免把主站打爆。
-   */
-  if (preOpen) {
-    const byCode = new Map(quotes.map((quote) => [quote.code, quote]))
-    const missing = unique.filter((code) => {
-      const quote = byCode.get(code)
-      return !quote || !(quote.price > 0)
-    })
-    const targets = unique.length <= 80 ? unique : missing
-    if (targets.length > 0) {
-      try {
-        const auctionQuotes = await bridge.send<Quote[]>(
-          'auction_quotes',
-          { codes: targets },
-          15_000,
-          true
-        )
-        quotes = mergeAuctionQuotes(quotes, auctionQuotes)
-      } catch (error) {
-        if (signal?.aborted) throw error
-        // 竞价兜底失败不改变已有报价
-      }
-    }
-  }
-
-  if (quotes.length === 0) {
-    // 7709 刷新暂时不可用时先退到 MAC 报价（仍是通达信通道），界面不至于全空
-    try {
-      quotes = await bridge.send<Quote[]>('mac_quotes', { codes: unique }, 15_000)
-    } catch {
-      quotes = []
-    }
-  }
-  if (quotes.length === 0 && !signal?.aborted) {
-    // MAC 也空时再给 7709 一次重启后的机会
-    quotes = await bridge.send<Quote[]>('refresh', { codes: unique }, REFRESH_TIMEOUT_MS, true)
-  }
-
-  const byCode = new Map(quotes.map((quote) => [quote.code, quote]))
-  return unique
-    .map((code) => byCode.get(code))
-    .filter((quote): quote is Quote => quote !== undefined)
+  // 内部最多串行 4 个 7709 请求；给足总时长，行情是全局 1 秒主时钟，插队执行。
+  return bridge.send<Quote[]>('live_quotes', { codes: unique }, LIVE_QUOTES_TIMEOUT_MS, true)
 }
 
 /** 0x054b 服务端排序的一页分类行情；category=6 是沪深 A 股。 */
@@ -597,7 +415,7 @@ interface BreadthPage {
  * 涨跌家数按页扫：每 8 页（640 只）发一次请求，页间让 priority 的图表请求
  * 插队。整包扫描会独占串行 sidecar 5~7 秒，期间切股票/切分时都要等。
  */
-export async function fetchMarketBreadth(): Promise<MarketBreadth> {
+async function scanMarketBreadth(): Promise<MarketBreadth> {
   let start = 0
   let up = 0
   let down = 0
@@ -626,6 +444,13 @@ export async function fetchMarketBreadth(): Promise<MarketBreadth> {
     start = page.nextStart
   }
   throw new TdxError('涨跌家数分页异常')
+}
+
+// 按时段缓存：交易 15 秒、午休 120 秒、收盘 300 秒，跨日失效。
+const loadBreadthCached = createBreadthLoader()
+
+export async function fetchMarketBreadth(): Promise<MarketBreadth> {
+  return loadBreadthCached(scanMarketBreadth)
 }
 
 const DATA_TIMEOUT_MS = 180_000
@@ -896,23 +721,13 @@ export async function fetchKline(
   return klineCache.resolve(key, () => bridge.send<KLineSeries>('kline', request))
 }
 
-/** 按 `date` 合并 K 线；tail 只有最近 20 根，不能覆盖掉本地 800 根历史。 */
-function mergeBarLists(
-  base: KLineSeries['bars'],
-  incoming: KLineSeries['bars']
-): KLineSeries['bars'] {
-  const byDate = new Map(base.map((bar) => [bar.date, bar]))
-  for (const bar of incoming) byDate.set(bar.date, bar)
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
-}
-
 /**
  * 每秒推送给图表的 K 线：
  *  - 首帧由 fetchPushTask 调 fetchKline 拿全量；
  *  - 这里只取最近 20 根，并在主进程合并进 800 根缓存；
  *  - 每 60 秒补一次全量，避免 20 根窗口被长时间运行甩开。
  *
- * 这样图表每秒都能拿到最新一根，但 sidecar/IPC 不会每秒搬 800 根。
+ * 增量策略与 Web 共用 `fetchLiveKline`，这里只注入 IPC 拉取与主进程缓存。
  */
 export async function fetchKlineLive(
   code: string,
@@ -922,53 +737,17 @@ export async function fetchKlineLive(
   first = false
 ): Promise<KLineSeries> {
   assertSupported(code)
-  const safeCount = Math.min(800, Math.max(1, Math.trunc(count)))
-  const key = `${code}:${period}:${safeCount}:${adjust}`
-  const cached = liveKlineCache.get(key)
-
-  if (first || !cached || Date.now() - cached.fullAt >= KLINE_FULL_REFRESH_MS) {
-    const series = await bridge.send<KLineSeries>('kline', {
-      code,
-      period,
-      count: safeCount,
-      adjust
-    })
-    liveKlineCache.set(key, { series, fullAt: Date.now() })
-    return series
-  }
-
-  const tail = await bridge.send<KLineSeries>(
-    'kline',
-    { code, period, count: KLINE_TAIL_COUNT, adjust },
-    QUOTES_TIMEOUT_MS
+  return fetchLiveKline(
+    { code, period, count, adjust },
+    first,
+    (wanted, tail) =>
+      bridge.send<KLineSeries>(
+        'kline',
+        { code, period, count: wanted, adjust },
+        tail ? QUOTES_TIMEOUT_MS : undefined
+      ),
+    liveKlineCache
   )
-  const lastCached = cached.series.bars[cached.series.bars.length - 1]
-  /*
-   * tail 窗口 20 根；如果第一根都比本地最后一根新，说明已经超过 20 根没补，
-   * 再合并就会出现一段空洞。直接重取全量。
-   */
-  if (tail.bars.length >= KLINE_TAIL_COUNT && lastCached && tail.bars[0].date > lastCached.date) {
-    const series = await bridge.send<KLineSeries>('kline', {
-      code,
-      period,
-      count: safeCount,
-      adjust
-    })
-    liveKlineCache.set(key, { series, fullAt: Date.now() })
-    return series
-  }
-
-  cached.series = {
-    ...cached.series,
-    bars: mergeBarLists(cached.series.bars, tail.bars)
-  }
-  return {
-    code,
-    period,
-    bars: tail.bars,
-    source: 'network',
-    tail: true
-  }
 }
 
 /* ------------------------------------------------------------------ 分时 */

@@ -8,6 +8,7 @@ import {
   mergeKlineSeries,
   multiRefreshMs,
   quoteTimeSeconds,
+  tapeRefreshMs,
   tradingSlot,
   usableCachedSeries,
   withOpeningBaseline
@@ -82,6 +83,16 @@ describe('chartRefreshMs', () => {
     expect(chartRefreshMs('minute', 'lunch-break')).toBe(30_000)
     expect(chartRefreshMs('day', 'closed')).toBe(60_000)
     expect(chartRefreshMs('minute', 'weekend')).toBe(60_000)
+  })
+})
+
+describe('tapeRefreshMs', () => {
+  it('交易/竞价 1 秒，午休 30 秒，收盘后 60 秒', () => {
+    expect(tapeRefreshMs('trading')).toBe(1000)
+    expect(tapeRefreshMs('pre-open')).toBe(1000)
+    expect(tapeRefreshMs('lunch-break')).toBe(30_000)
+    expect(tapeRefreshMs('closed')).toBe(60_000)
+    expect(tapeRefreshMs('weekend')).toBe(60_000)
   })
 })
 

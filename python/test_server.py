@@ -11,8 +11,16 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from tdx_server import create_server
+from tdx_server import (
+    BREADTH_CLOSED_TTL,
+    BREADTH_LUNCH_TTL,
+    BREADTH_TRADING_TTL,
+    _breadth_ttl,
+    _quote_interval,
+    create_server,
+)
 
 
 class FakeBridge:
@@ -20,6 +28,9 @@ class FakeBridge:
         pass
 
     def quotes(self, codes):
+        return [{"code": code} for code in codes]
+
+    def live_quotes(self, codes):
         return [{"code": code} for code in codes]
 
     def code_list(self):
@@ -115,6 +126,15 @@ class FakeBridge:
     def export_klines(self, codes, period="day", count=240, adjust="qfq"):
         return {"dir": "/tmp", "files": [], "rows": 0, "codes": len(codes), "generatedAt": "", "failed": []}
 
+    def cache_klines(self, codes, period="day", count=800, adjust="qfq", skip_existing=False):
+        return {
+            "codes": len(codes),
+            "period": period,
+            "count": count,
+            "adjust": adjust,
+            "skipExisting": skip_existing,
+        }
+
     def local_min_write(self, path, bars):
         return {"path": path, "count": len(bars)}
 
@@ -132,6 +152,17 @@ class FakeBridge:
 
     def market_breadth(self):
         return {"up": 1, "down": 2, "flat": 3, "total": 6, "updatedAt": 0}
+
+    def market_breadth_page(self, start=0, pages=8):
+        return {
+            "up": 1,
+            "down": 2,
+            "flat": 3,
+            "limitUp": 1,
+            "limitDown": 0,
+            "nextStart": None,
+            "updatedAt": 0,
+        }
 
     def f10_change_plans(self, code):
         return {"columns": [], "rows": [], "count": 0}
@@ -290,6 +321,26 @@ class TestHttpApi(unittest.TestCase):
             [item["code"] for item in payload["result"]], ["sh600519", "sz000858"]
         )
 
+    def test_cache_klines_passes_skip_existing(self):
+        status, payload, _ = self.request(
+            "POST",
+            "/api/cache_klines",
+            {
+                "codes": ["sh600519"],
+                "period": "5s",
+                "count": 800,
+                "adjust": "none",
+                "skipExisting": True,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["result"]["skipExisting"])
+        status, payload, _ = self.request(
+            "POST", "/api/cache_klines", {"codes": ["sh600519"]}
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["result"]["skipExisting"])
+
     def test_f10_industry(self):
         status, payload, _ = self.request(
             "POST", "/api/f10_industry", {"code": "sh600519", "section": "news"}
@@ -297,6 +348,117 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["result"]["section"], "news")
         self.assertEqual(payload["result"]["count"], 1)
+
+    def test_market_breadth_pages_aggregate(self):
+        class PagedBridge(FakeBridge):
+            def __init__(self):
+                self.calls = []
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls.append((start, pages))
+                if start == 0:
+                    return {
+                        "up": 1,
+                        "down": 2,
+                        "flat": 3,
+                        "limitUp": 1,
+                        "limitDown": 0,
+                        "nextStart": 640,
+                        "updatedAt": 1,
+                    }
+                return {
+                    "up": 4,
+                    "down": 5,
+                    "flat": 6,
+                    "limitUp": 0,
+                    "limitDown": 1,
+                    "nextStart": None,
+                    "updatedAt": 2,
+                }
+
+        bridge = PagedBridge()
+        self.server.bridge = bridge
+        status, payload, _ = self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload["result"],
+            {
+                "up": 5,
+                "down": 7,
+                "flat": 9,
+                "limitUp": 1,
+                "limitDown": 1,
+                "total": 21,
+                "updatedAt": 2,
+            },
+        )
+        self.assertEqual([call[0] for call in bridge.calls], [0, 640])
+
+    def test_market_breadth_cached_within_ttl(self):
+        class CountingBridge(FakeBridge):
+            def __init__(self):
+                self.calls = 0
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls += 1
+                return super().market_breadth_page(start, pages)
+
+        bridge = CountingBridge()
+        self.server.bridge = bridge
+        with patch("tdx_server._breadth_ttl", return_value=60.0):
+            self.request("POST", "/api/market_breadth", {})
+            status, payload, _ = self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["total"], 6)
+        self.assertEqual(bridge.calls, 1)
+
+    def test_market_breadth_rescans_after_ttl(self):
+        class CountingBridge(FakeBridge):
+            def __init__(self):
+                self.calls = 0
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls += 1
+                return super().market_breadth_page(start, pages)
+
+        bridge = CountingBridge()
+        self.server.bridge = bridge
+        with patch("tdx_server._breadth_ttl", return_value=0.0):
+            self.request("POST", "/api/market_breadth", {})
+            self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(bridge.calls, 2)
+
+    def test_market_breadth_rescans_on_new_day(self):
+        class CountingBridge(FakeBridge):
+            def __init__(self):
+                self.calls = 0
+
+            def market_breadth_page(self, start=0, pages=8):
+                self.calls += 1
+                return super().market_breadth_page(start, pages)
+
+        bridge = CountingBridge()
+        self.server.bridge = bridge
+        with patch("tdx_server._breadth_ttl", return_value=600.0):
+            with patch("tdx_server._shanghai_day", return_value="2026-11-05"):
+                self.request("POST", "/api/market_breadth", {})
+            with patch("tdx_server._shanghai_day", return_value="2026-11-06"):
+                self.request("POST", "/api/market_breadth", {})
+        self.assertEqual(bridge.calls, 2)
+
+    def test_f10_statement_full_flag(self):
+        status, payload, _ = self.request(
+            "POST",
+            "/api/f10_statement",
+            {"code": "sh600519", "kind": "zcfzb", "full": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["result"]["full"])
+        status, payload, _ = self.request(
+            "POST", "/api/f10_statement", {"code": "sh600519", "kind": "zcfzb"}
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["result"]["full"])
 
     def test_category_and_trades(self):
         status, payload, _ = self.request(
@@ -483,6 +645,36 @@ class TestHttpApi(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["result"]["quotes"][0]["code"], "sh600519")
         connection.close()
+
+
+class TestQuoteInterval(unittest.TestCase):
+    def test_trading_and_pre_open_keep_requested_interval(self):
+        for clock in (("10:00:00", "trading"), ("09:20:00", "pre-open")):
+            with patch("tdx_server.shanghai_clock", return_value=clock):
+                self.assertEqual(_quote_interval(1.0), 1.0)
+
+    def test_closed_scales_ten_times_with_thirty_second_floor(self):
+        with patch("tdx_server.shanghai_clock", return_value=("20:00:00", "closed")):
+            self.assertEqual(_quote_interval(1.0), 30.0)
+            self.assertEqual(_quote_interval(5.0), 50.0)
+
+    def test_lunch_break_also_scales(self):
+        with patch("tdx_server.shanghai_clock", return_value=("12:00:00", "lunch-break")):
+            self.assertEqual(_quote_interval(1.0), 30.0)
+
+
+class TestBreadthTtl(unittest.TestCase):
+    def test_ttl_by_session(self):
+        cases = (
+            (("10:00:00", "trading"), BREADTH_TRADING_TTL),
+            (("09:20:00", "pre-open"), BREADTH_TRADING_TTL),
+            (("12:00:00", "lunch-break"), BREADTH_LUNCH_TTL),
+            (("20:00:00", "closed"), BREADTH_CLOSED_TTL),
+            (("10:00:00", "weekend"), BREADTH_CLOSED_TTL),
+        )
+        for clock, expected in cases:
+            with patch("tdx_server.shanghai_clock", return_value=clock):
+                self.assertEqual(_breadth_ttl(), expected)
 
 
 class TestStaticWeb(unittest.TestCase):

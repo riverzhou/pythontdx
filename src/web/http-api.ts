@@ -71,6 +71,7 @@ import type {
   TradeTick
 } from '@shared/types'
 import type { CategoryRequest, KLineRequest, PythonTdxApi, TradesRequest } from '@shared/ipc'
+import { fetchLiveKline, type LiveKlineState } from '@shared/kline-live'
 import type { SearchEntry, SearchSecurity } from '@shared/search'
 import { DEFAULT_GROUP_ID, DEFAULT_SETTINGS, SEED_GROUPS, STATE_VERSION } from '@shared/types'
 import { WEB_VERSION } from './version'
@@ -277,10 +278,23 @@ export function createHttpApi(): PythonTdxApi {
   }
 
   const pushListeners = new Set<(update: PushUpdate) => void>()
-  const pushTimers = new Map<number, number>()
+  /** 每个订阅的停止函数：清定时器并阻止在途 tick 继续调度 */
+  const pushStops = new Map<number, () => void>()
   let nextPushId = 1
+  /** 每个标签页独立的实时 K 线全量缓存；增量策略与桌面共用 */
+  const liveKlineCache = new Map<string, LiveKlineState>()
 
-  const fetchPushTask = (task: PushTask): Promise<unknown> => {
+  const klinePath = (task: Extract<PushTask, { kind: 'kline' }>, count: number): string => {
+    const params = new URLSearchParams({
+      code: task.code,
+      period: task.period,
+      count: String(count),
+      adjust: task.adjust
+    })
+    return `/api/kline?${params.toString()}`
+  }
+
+  const fetchPushTask = (task: PushTask, first = false): Promise<unknown> => {
     switch (task.kind) {
       case 'category':
         return post<CategoryQuote[]>('/api/category', {
@@ -304,15 +318,18 @@ export function createHttpApi(): PythonTdxApi {
           post<MoneyFlowRecord[]>('/api/money_flow', { code: task.code }),
           post<MacMoneyFlow>('/api/mac_money_flow', { code: task.code })
         ]).then(([flow, mac]) => ({ flow, mac }))
-      case 'kline': {
-        const params = new URLSearchParams({
-          code: task.code,
-          period: task.period,
-          count: String(task.count),
-          adjust: task.adjust
-        })
-        return request<KLineSeries>(`/api/kline?${params.toString()}`)
-      }
+      case 'kline':
+        return fetchLiveKline(
+          {
+            code: task.code,
+            period: task.period,
+            count: task.count,
+            adjust: task.adjust
+          },
+          first,
+          (count) => request<KLineSeries>(klinePath(task, count)),
+          liveKlineCache
+        )
       case 'minute':
         return request<MinuteTrend>(`/api/minute?code=${encodeURIComponent(task.code)}`)
       case 'fiveDay':
@@ -327,9 +344,21 @@ export function createHttpApi(): PythonTdxApi {
   const push = {
     subscribe: async (task: PushTask, intervalMs: number): Promise<number> => {
       const id = nextPushId++
+      const delay = Math.max(1000, intervalMs)
+      let timer: number | undefined
+      let stopped = false
+      let inFlight = false
+      let fetched = false
+
       const tick = async (): Promise<void> => {
+        // 防重入：上一次请求没回来时不再叠加。长请求 + 1 秒间隔会堆积，
+        // 每帧都带全量 K 线时会把浏览器和 sidecar 一起压垮。
+        if (stopped || inFlight) return
+        inFlight = true
+        const first = !fetched
+        fetched = true
         try {
-          emitPush({ id, at: Date.now(), task, data: await fetchPushTask(task) })
+          emitPush({ id, at: Date.now(), task, data: await fetchPushTask(task, first) })
         } catch (error) {
           emitPush({
             id,
@@ -337,17 +366,23 @@ export function createHttpApi(): PythonTdxApi {
             task,
             error: error instanceof Error ? error.message : String(error)
           })
+        } finally {
+          inFlight = false
+          // 链式调度：下一次从本次结束开始计时，而不是固定 interval 叠请求
+          if (!stopped) timer = window.setTimeout(() => void tick(), delay)
         }
       }
+
+      pushStops.set(id, () => {
+        stopped = true
+        if (timer !== undefined) window.clearTimeout(timer)
+      })
       await tick()
-      const timer = window.setInterval(() => void tick(), Math.max(1000, intervalMs))
-      pushTimers.set(id, timer)
       return id
     },
     unsubscribe: async (id: number): Promise<void> => {
-      const timer = pushTimers.get(id)
-      if (timer !== undefined) window.clearInterval(timer)
-      pushTimers.delete(id)
+      pushStops.get(id)?.()
+      pushStops.delete(id)
     },
     onUpdate: (listener: (update: PushUpdate) => void): (() => void) => {
       pushListeners.add(listener)
@@ -450,7 +485,8 @@ export function createHttpApi(): PythonTdxApi {
       institutions: (code) => post<F10ProfileTable>('/api/f10_institutions', { code }),
       controller: (code) => post<F10ProfileTable>('/api/f10_controller', { code }),
       changePlans: (code) => post<F10ProfileTable>('/api/f10_change_plans', { code }),
-      statement: (code, kind) => post<F10ProfileTable>('/api/f10_statement', { code, kind })
+      statement: (code, kind, full) =>
+        post<F10ProfileTable>('/api/f10_statement', { code, kind, full: full ?? false })
     },
     data: {
       statsSummary: () => post<TdxStatsSummary>('/api/stats_summary', {}),

@@ -226,7 +226,7 @@ class TestPlanAndShard(unittest.TestCase):
                 root
                 / "lake"
                 / "kline_1m"
-                / "trade_date=2026-11-04"
+                / f"trade_date={offline_sync._today()}"
                 / "sh600000.parquet"
             )
             target.parent.mkdir(parents=True)
@@ -249,7 +249,7 @@ class TestPlanAndShard(unittest.TestCase):
                 root
                 / "lake"
                 / "kline_1m"
-                / "trade_date=2026-11-04"
+                / f"trade_date={offline_sync._today()}"
                 / "sh600000.parquet"
             )
             target.parent.mkdir(parents=True)

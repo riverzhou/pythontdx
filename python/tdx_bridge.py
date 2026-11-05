@@ -378,6 +378,159 @@ CMD_VOLUME_PROFILE = 0x051A
 # 0x054c / 0x053e 共用的请求前缀；0x0547 是另一套「代码 + 游标」布局
 QUOTE_LIST_PREFIX = b"\x05\x00\x00\x00\x00\x00\x00\x00"
 REFRESH_BATCH = 100
+
+# 交易所时区固定 +08:00（与 src/shared/market.ts 一致，不跟随运行机器的时区）
+SHANGHAI_TZ = timezone(timedelta(hours=8))
+# 09:30:00–09:30:10 也走快照：开盘第一秒 0x0547 可能还没有可用的增量记录
+OPENING_GRACE_UNTIL = "09:30:10"
+# 竞价 0x056a 兜底：自选 <=80 只时全取，超过只补缺失/价格为 0 的
+AUCTION_FALLBACK_LIMIT = 80
+
+
+def shanghai_clock(now: datetime | None = None) -> tuple[str, str]:
+    """返回 (北京时间 HH:MM:SS, 交易时段)，时段划分与前端 shanghaiClock 一致。
+
+    只判断工作日/盘中时段，不含法定节假日；节假日按「已收盘」处理。
+    """
+    moment = datetime.now(SHANGHAI_TZ) if now is None else now
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=SHANGHAI_TZ)
+    else:
+        moment = moment.astimezone(SHANGHAI_TZ)
+    hm = moment.hour * 60 + moment.minute
+    if moment.weekday() >= 5:
+        session = "weekend"
+    elif 9 * 60 + 15 <= hm < 9 * 60 + 30:
+        session = "pre-open"
+    elif 9 * 60 + 30 <= hm < 11 * 60 + 30:
+        session = "trading"
+    elif 11 * 60 + 30 <= hm < 13 * 60:
+        session = "lunch-break"
+    elif 13 * 60 <= hm <= 15 * 60:
+        session = "trading"
+    else:
+        session = "closed"
+    return moment.strftime("%H:%M:%S"), session
+
+
+def _normalize_codes(codes: list[str]) -> list[str]:
+    return [
+        code
+        for code in dict.fromkeys(str(raw).strip().lower() for raw in codes or [])
+        if code
+    ]
+
+
+def _merge_quotes(base: list[dict], incoming: list[dict]) -> list[dict]:
+    """后者整条覆盖前者（竞价/开盘首秒以 0x054c 快照为准）。"""
+    by_code = {quote.get("code"): quote for quote in base if quote.get("code")}
+    for quote in incoming:
+        if quote.get("code"):
+            by_code[quote["code"]] = quote
+    return list(by_code.values())
+
+
+def _merge_auction_quotes(base: list[dict], auctions: list[dict]) -> list[dict]:
+    """竞价兜底：0x056a 虚拟撮合价覆盖价格，尽量保留快照里的昨收/五档。"""
+    by_code = {quote.get("code"): quote for quote in base if quote.get("code")}
+    for auction in auctions:
+        code = auction.get("code")
+        existing = by_code.get(code)
+        if existing is None:
+            by_code[code] = auction
+            continue
+        prev_close = float(auction.get("prevClose") or 0) or float(existing.get("prevClose") or 0)
+        price = float(auction.get("price") or 0) or float(existing.get("price") or 0)
+        change = price - prev_close if prev_close > 0 else float(existing.get("change") or 0)
+        existing_high = float(existing.get("high") or 0) or price
+        existing_low = float(existing.get("low") or 0) or price
+        auction_high = float(auction.get("high") or 0) or price
+        auction_low = float(auction.get("low") or 0) or price
+        high = max(existing_high, auction_high)
+        low = min(existing_low, auction_low)
+        by_code[code] = {
+            **existing,
+            **auction,
+            "price": price,
+            "prevClose": prev_close,
+            "open": float(existing.get("open") or 0) or float(auction.get("open") or 0),
+            "high": high,
+            "low": low,
+            "change": change,
+            "changePct": (change / prev_close * 100)
+            if prev_close > 0
+            else existing.get("changePct"),
+            "volume": existing.get("volume")
+            if float(existing.get("volume") or 0) > 0
+            else auction.get("volume"),
+            "amount": existing.get("amount")
+            if float(existing.get("amount") or 0) > 0
+            else auction.get("amount"),
+            "bids": existing.get("bids") or auction.get("bids") or [],
+            "asks": existing.get("asks") or auction.get("asks") or [],
+            "auction": True,
+            "auctionTime": auction.get("auctionTime"),
+        }
+    return list(by_code.values())
+
+
+def _merge_snapshot_prices(snapshots: list[dict], refreshed: list[dict]) -> list[dict]:
+    """盘中：0x054c 快照负责价格新鲜度，0x0547 保留五档深度与其它字段。
+
+    实测免费主站的 0x0547 增量约 3 秒才推一次新价，0x054c 约 1 秒；
+    用快照覆盖价格/量/额，`updateTime` 置空，让界面显示接收时间。
+    """
+    if not snapshots:
+        return list(refreshed)
+    if not refreshed:
+        return list(snapshots)
+    by_code = {quote.get("code"): quote for quote in refreshed if quote.get("code")}
+    for snapshot in snapshots:
+        code = snapshot.get("code")
+        base = by_code.get(code)
+        if base is None:
+            by_code[code] = snapshot
+            continue
+        prev_close = float(snapshot.get("prevClose") or 0) or float(base.get("prevClose") or 0)
+        price = float(snapshot.get("price") or 0) or float(base.get("price") or 0)
+        change = price - prev_close if prev_close > 0 else float(base.get("change") or 0)
+        base_low = float(base.get("low") or 0)
+        high = max(
+            float(snapshot.get("high") or 0) or price,
+            float(base.get("high") or 0),
+        )
+        low = min(
+            float(snapshot.get("low") or 0) or price,
+            base_low if base_low > 0 else price,
+        )
+        volume = max(float(snapshot.get("volume") or 0), float(base.get("volume") or 0))
+        amount = max(float(snapshot.get("amount") or 0), float(base.get("amount") or 0))
+        by_code[code] = {
+            **base,
+            "price": price,
+            "prevClose": prev_close,
+            "open": float(snapshot.get("open") or 0) or float(base.get("open") or 0),
+            "high": high,
+            "low": low,
+            "change": change,
+            "changePct": (change / prev_close * 100)
+            if prev_close > 0
+            else base.get("changePct"),
+            "volume": volume,
+            "amount": amount,
+            "avgPrice": (amount / (volume * 100))
+            if volume > 0 and amount > 0
+            else base.get("avgPrice"),
+            "amplitude": ((high - low) / prev_close * 100)
+            if prev_close > 0
+            else base.get("amplitude"),
+            "time": snapshot.get("time"),
+            "receivedAt": snapshot.get("receivedAt"),
+            # 快照没有交易所 updateTime；不要拿 0x0547 的旧时间冒充这一帧
+            "updateTime": None,
+        }
+    return list(by_code.values())
+
 TRADE_PAGE = 1800
 AUCTION_RECORD = 16
 AUCTION_LIMIT = 500
@@ -4672,6 +4825,74 @@ class Bridge:
         except Exception as error:  # noqa: BLE001
             return self._mac_fallback(codes, error)
 
+    def live_quotes(self, codes: list[str]) -> list[dict]:
+        """实时行情编排：Electron IPC、HTTP、SSE/WebSocket 共用这一份实现。
+
+        主链路 0x0547：首次游标 0 建基线，后续按 updateTime 推进；没有新成交时
+        服务端返回 0 条，Python 复用上一帧。0x054c 快照负责价格新鲜度（约 1 秒），
+        盘中用它覆盖价格/量/额，保留 0x0547 的五档深度。集合竞价（09:15–09:30）
+        和开盘首 10 秒以快照为准，并用 0x056a 虚拟撮合价兜底。
+
+        编排放在 bridge 内而不是各自的调用方，避免 Electron 与 Web 两套逻辑漂移；
+        游标状态本来也在这里，不需要跨进程往返搬运中间结果。
+        """
+        unique = _normalize_codes(codes)
+        if not unique:
+            return []
+
+        now, session = shanghai_clock()
+        pre_open = session == "pre-open"
+        opening_window = pre_open or (
+            session == "trading" and now <= OPENING_GRACE_UNTIL
+        )
+
+        try:
+            snapshots = self.snapshots(unique)
+        except Exception:  # noqa: BLE001 - 快照失败仍可走 0x0547
+            snapshots = []
+
+        refreshed: list[dict] = []
+        if not opening_window or len(snapshots) < len(unique):
+            try:
+                refreshed = self.refresh_quotes(unique)
+            except Exception:  # noqa: BLE001 - 保持已有快照，走 MAC 兜底
+                refreshed = []
+
+        quotes = (
+            # 竞价/开盘首秒快照优先：0x0547 的缓存帧可能是昨收或更早的竞价值
+            _merge_quotes(refreshed, snapshots)
+            if opening_window
+            else _merge_snapshot_prices(snapshots, refreshed)
+        )
+
+        if pre_open:
+            by_code = {quote.get("code"): quote for quote in quotes if quote.get("code")}
+            missing = [
+                code
+                for code in unique
+                if not float((by_code.get(code) or {}).get("price") or 0) > 0
+            ]
+            # 自选 <=80 只时全部取一次；超过只补缺失的，避免把主站打爆
+            targets = unique if len(unique) <= AUCTION_FALLBACK_LIMIT else missing
+            if targets:
+                try:
+                    quotes = _merge_auction_quotes(quotes, self.auction_quotes(targets))
+                except Exception:  # noqa: BLE001 - 竞价兜底失败不改变已有报价
+                    pass
+
+        if not quotes:
+            # 7709 刷新暂时不可用时先退到 MAC 报价，界面不至于全空
+            try:
+                quotes = self.mac_quotes(unique)
+            except Exception:  # noqa: BLE001
+                quotes = []
+        if not quotes:
+            # MAC 也空时再给 7709 一次重启后的机会；失败向上抛，由调用方展示
+            quotes = self.refresh_quotes(unique)
+
+        by_code = {quote.get("code"): quote for quote in quotes if quote.get("code")}
+        return [by_code[code] for code in unique if code in by_code]
+
     def _prepare_items(self, codes: list[str]) -> tuple[list[str], list[tuple[int, str]]]:
         unique: list[str] = []
         items: list[tuple[int, str]] = []
@@ -4821,8 +5042,13 @@ class Bridge:
         count: int = 80,
         ascending: bool = False,
         filter_raw: int = 0,
+        with_finance: bool = True,
     ) -> list[dict]:
-        """0x054b 分类行情：服务端排序，一页最多 80 条；category=6 沪深 A 股。"""
+        """0x054b 分类行情：服务端排序，一页最多 80 条；category=6 沪深 A 股。
+
+        `with_finance=False` 跳过市盈率等财务附加，只给涨跌家数这类纯统计用：
+        财务要额外 0x0010 往返，5000+ 只会让整轮扫描慢一倍。
+        """
         received_at = int(time.time() * 1000)
         try:
             self.index.ensure(self.conn)
@@ -4840,7 +5066,8 @@ class Bridge:
             ),
         )
         quotes = parse_category_quotes(body, received_at, self.index.by_code)
-        self._attach_finance(quotes)
+        if with_finance:
+            self._attach_finance(quotes)
         return quotes
 
     def category_snapshot(
@@ -4891,7 +5118,7 @@ class Bridge:
             pythontdx_data_dir() / "lake" / "category_quotes", limit
         )
 
-    def _all_category_quotes(self) -> list[dict]:
+    def _all_category_quotes(self, with_finance: bool = True) -> list[dict]:
         if self.screen_cache and self.screen_cache[0] > time.time():
             return self.screen_cache[1]
         quotes: list[dict] = []
@@ -4902,6 +5129,7 @@ class Bridge:
                 sort_type=0x000E,
                 start=start,
                 count=80,
+                with_finance=with_finance,
             )
             quotes.extend(page)
             if len(page) < 80:
@@ -5082,7 +5310,7 @@ class Bridge:
 
     def market_breadth(self) -> dict:
         """全 A 股涨跌家数（不含指数/基金）。"""
-        quotes = self._all_category_quotes()
+        quotes = self._all_category_quotes(with_finance=False)
         return {
             **self._breadth_counts(quotes),
             "updatedAt": int(time.time() * 1000),
@@ -5108,6 +5336,7 @@ class Bridge:
                 sort_type=0x000E,
                 start=start,
                 count=80,
+                with_finance=False,
             )
             if not page:
                 done = True
@@ -7235,12 +7464,14 @@ class Bridge:
         adjust: str = 'qfq',
         cache_only: bool = False,
         anchor_date: str | None = None,
+        start: int = 0,
     ) -> dict:
         market, symbol = parse_code(code)
         if period not in PERIOD_RAW:
             raise TdxError("K 线周期只支持 day / week / month")
 
         safe_count = max(1, min(800, int(count)))
+        safe_start = max(0, int(start))
         requested_adjust = str(adjust or "qfq")
         fixed = requested_adjust in {"fixed_qfq", "fixed_hfq"}
         if fixed and not anchor_date:
@@ -7255,6 +7486,8 @@ class Bridge:
         cache_adjust = f"{safe_adjust}@{anchor_raw}" if fixed else safe_adjust
         kind = "index" if is_index_code(market, symbol) else "stock"
         if cache_only:
+            if safe_start:
+                raise TdxError("cache_only 只支持 start=0（分页请求不落缓存）")
             cached = _read_kline_cache(code, period, safe_count, cache_adjust)
             if cached is not None:
                 return cached
@@ -7289,22 +7522,26 @@ class Bridge:
                     PERIOD_RAW[period],
                     safe_count,
                     {'none': 0, 'qfq': 1, 'hfq': 2, 'fixed_qfq': 3, 'fixed_hfq': 4}.get(safe_adjust, 1),
-                    0,
+                    safe_start,
                     {'5s': 5, '15s': 15, '2m': 2, '3m': 3, '4m': 4, '6m': 6, '8m': 8, '10m': 10, '12m': 12, '18m': 18, '20m': 20, '24m': 24, '36m': 36, '48m': 48, '2d': 2, '3d': 3, '4d': 4, '6d': 6, '9d': 9, '12d': 12, '18d': 18, '24d': 24, '45d': 45}.get(period, 1),
                     anchor_raw,
                 ),
             )
             bars = parse_bars(body, kind, PERIOD_RAW[period])
-            _write_kline_cache(code, period, safe_count, cache_adjust, bars, "network")
+            if not safe_start:
+                _write_kline_cache(code, period, safe_count, cache_adjust, bars, "network")
             return {
                 "code": code,
                 "period": period,
                 "bars": bars,
+                "start": safe_start,
                 "source": "7709",
                 "adjust": safe_adjust,
                 "anchorDate": anchor_date if fixed else None,
             }
         except Exception:
+            if safe_start:
+                raise
             cached = _read_kline_cache(code, period, safe_count, cache_adjust)
             if cached is not None:
                 return cached
@@ -8069,6 +8306,8 @@ def dispatch(bridge: Bridge, cmd: str, payload: dict) -> object:
         return bridge.refresh_quotes(
             payload.get("codes") or [], payload.get("cursors") or {}
         )
+    if cmd == "live_quotes":
+        return bridge.live_quotes(payload.get("codes") or [])
     if cmd == "category":
         return bridge.category_quotes(
             category=int(payload.get("category", 6)),

@@ -21,16 +21,55 @@ import mimetypes
 import sys
 import threading
 import time
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tdx_bridge import Bridge, TdxError
+from tdx_bridge import SHANGHAI_TZ, Bridge, TdxError, shanghai_clock
 from subscription_hub import SubscriptionHub
 
 MAX_BODY_BYTES = 1024 * 1024
+
+# 非交易时段的行情轮询下限：与桌面 QuotePoller 的规则保持一致
+IDLE_QUOTE_INTERVAL_SCALE = 10
+IDLE_QUOTE_MIN_SECONDS = 30.0
+
+
+def _quote_interval(interval: float) -> float:
+    """交易/竞价按订阅间隔；收盘后降到 10 倍、最少 30 秒。
+
+    Web 端没有主进程 poller，SSE/WebSocket 的轮询节奏由服务端统一收口，
+    否则每个标签页都会在收盘后继续按 1 秒空转。
+    """
+    _now, session = shanghai_clock()
+    if session in {"trading", "pre-open"}:
+        return interval
+    return max(interval * IDLE_QUOTE_INTERVAL_SCALE, IDLE_QUOTE_MIN_SECONDS)
+
+
+# 涨跌家数整轮扫描要 70 次 0x054b 往返：交易时段对齐前端 30 秒轮询，
+# 午休与收盘后数据不变，直接复用缓存。
+BREADTH_TRADING_TTL = 15.0
+BREADTH_LUNCH_TTL = 120.0
+BREADTH_CLOSED_TTL = 300.0
+
+
+def _breadth_ttl() -> float:
+    """涨跌家数缓存时长，按时段区分。"""
+    _now, session = shanghai_clock()
+    if session in {"trading", "pre-open"}:
+        return BREADTH_TRADING_TTL
+    if session == "lunch-break":
+        return BREADTH_LUNCH_TTL
+    return BREADTH_CLOSED_TTL
+
+
+def _shanghai_day() -> str:
+    """缓存跨日失效：收盘缓存不能带到下一个交易日。"""
+    return datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d")
 
 
 class TdxApiServer(ThreadingHTTPServer):
@@ -46,13 +85,71 @@ class TdxApiServer(ThreadingHTTPServer):
         super().__init__(address, ApiHandler)
         self.bridge = bridge
         self.lock = threading.Lock()
+        # 涨跌家数缓存：single-flight 让多个标签页共享同一轮扫描。
+        # 锁顺序固定为 breadth_lock -> lock，避免与分页扫描互锁。
+        self.breadth_lock = threading.Lock()
+        self.breadth_cache: dict | None = None
+        self.breadth_at = 0.0
+        self.breadth_day = ""
         self.web_dir = Path(web_dir).resolve() if web_dir else None
         # SSE/WebSocket 共享一个订阅 Hub：同一组代码只轮询一次，结果扇出。
-        self.hub = SubscriptionHub(self._fetch_quotes)
+        # 收盘/午休由 _quote_interval 统一降频，客户端无需感知。
+        self.hub = SubscriptionHub(self._fetch_quotes, interval_for=_quote_interval)
 
     def _fetch_quotes(self, codes: list[str]) -> list[dict]:
+        # 与 Electron IPC、/api/quotes 共用同一套实时行情编排
         with self.lock:
-            return self.bridge.quotes(codes)
+            return self.bridge.live_quotes(codes)
+
+    def market_breadth(self) -> dict:
+        """带缓存的全市场涨跌家数。
+
+        扫描本身要 70 次往返；缓存命中时直接返回，交易时段 TTL 15 秒与前端
+        30 秒轮询对齐，午休 120 秒、收盘 300 秒，跨日强制失效。
+        """
+        with self.breadth_lock:
+            now = time.monotonic()
+            day = _shanghai_day()
+            cached = self.breadth_cache
+            if cached is not None and self.breadth_day == day:
+                if now - self.breadth_at < _breadth_ttl():
+                    return cached
+            value = self._scan_breadth()
+            self.breadth_cache = value
+            self.breadth_at = time.monotonic()
+            self.breadth_day = day
+            return value
+
+    def _scan_breadth(self) -> dict:
+        """分页扫描全 A 股涨跌家数。
+
+        每页重新加锁，图表/逐笔请求可以在页与页之间插队。
+        """
+        start = 0
+        up = down = flat = limit_up = limit_down = 0
+        updated_at = 0
+        for _ in range(200):
+            with self.lock:
+                page = self.bridge.market_breadth_page(start, 8)
+            up += int(page.get("up") or 0)
+            down += int(page.get("down") or 0)
+            flat += int(page.get("flat") or 0)
+            limit_up += int(page.get("limitUp") or 0)
+            limit_down += int(page.get("limitDown") or 0)
+            updated_at = int(page.get("updatedAt") or updated_at)
+            next_start = page.get("nextStart")
+            if next_start is None:
+                return {
+                    "up": up,
+                    "down": down,
+                    "flat": flat,
+                    "limitUp": limit_up,
+                    "limitDown": limit_down,
+                    "total": up + down + flat,
+                    "updatedAt": updated_at,
+                }
+            start = int(next_start)
+        raise TdxError("涨跌家数分页异常")
 
     def server_close(self) -> None:
         try:
@@ -402,6 +499,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                             query.get("adjust", "qfq"),
                             query.get("cacheOnly") in {"1", "true", "yes"},
                             query.get("anchorDate") or None,
+                            int(query.get("start", "0")),
                         )
                     )
                 return
@@ -643,12 +741,16 @@ class ApiHandler(BaseHTTPRequestHandler):
                         )
                     )
                 return
+            if parsed.path == "/api/server_speed_test":
+                with self.server.lock:
+                    self._ok(self.server.bridge.server_speed_test())
+                return
             if parsed.path == "/api/quotes":
                 codes = payload.get("codes") or []
                 if not isinstance(codes, list):
                     raise TdxError("codes 必须是数组")
                 with self.server.lock:
-                    self._ok(self.server.bridge.quotes(codes))
+                    self._ok(self.server.bridge.live_quotes(codes))
                 return
             if parsed.path == "/api/category":
                 with self.server.lock:
@@ -790,30 +892,28 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._ok(self.server.bridge.money_flow(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_pit_list":
-                with self.server.lock:
-                    from f10_pit import list_f10_snapshots
-                    from tdx_bridge import pythontdx_data_dir
+                from f10_pit import list_f10_snapshots
+                from tdx_bridge import pythontdx_data_dir
 
-                    self._ok(
-                        list_f10_snapshots(
-                            pythontdx_data_dir() / "lake" / "f10_pit",
-                            int(payload.get("limit", 50)),
-                        )
+                self._ok(
+                    list_f10_snapshots(
+                        pythontdx_data_dir() / "lake" / "f10_pit",
+                        int(payload.get("limit", 50)),
                     )
+                )
                 return
             if parsed.path == "/api/f10_pit_read":
-                with self.server.lock:
-                    from f10_pit import read_f10_snapshot
-                    from tdx_bridge import pythontdx_data_dir
+                from f10_pit import read_f10_snapshot
+                from tdx_bridge import pythontdx_data_dir
 
-                    self._ok(
-                        read_f10_snapshot(
-                            pythontdx_data_dir() / "lake" / "f10_pit",
-                            str(payload.get("code") or ""),
-                            str(payload.get("table") or ""),
-                            str(payload.get("date") or ""),
-                        )
+                self._ok(
+                    read_f10_snapshot(
+                        pythontdx_data_dir() / "lake" / "f10_pit",
+                        str(payload.get("code") or ""),
+                        str(payload.get("table") or ""),
+                        str(payload.get("date") or ""),
                     )
+                )
                 return
             if parsed.path == "/api/f10_catalog":
                 with self.server.lock:
@@ -831,36 +931,28 @@ class ApiHandler(BaseHTTPRequestHandler):
                     )
                 return
             if parsed.path == "/api/f10_announcements":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_announcements(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_announcements(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_profile":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_profile(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_profile(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_valuation":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_valuation(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_valuation(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_finance":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_finance(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_finance(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_business":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_business(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_business(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_shareholders":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_shareholders(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_shareholders(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_reports":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_reports(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_reports(payload.get("code", "")))
                 return
             if parsed.path == "/api/f10_news":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_news(payload.get("code", "")))
+                self._ok(self.server.bridge.f10_news(payload.get("code", "")))
                 return
             if parsed.path == "/api/gbbq_read":
                 with self.server.lock:
@@ -877,12 +969,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._ok(self.server.bridge.gbbq_archive_save(payload.get("path")))
                 return
             if parsed.path == "/api/f10_limit_board_archive_save":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_limit_board_archive_save(
-                            payload.get("startDate"), payload.get("endDate")
-                        )
+                self._ok(
+                    self.server.bridge.f10_limit_board_archive_save(
+                        payload.get("startDate"), payload.get("endDate")
                     )
+                )
                 return
             if parsed.path == "/api/finance_history_catalog":
                 with self.server.lock:
@@ -902,293 +993,261 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._ok({"channels": NEWS_CHANNELS, "groups": NEWS_CHANNEL_GROUPS})
                 return
             if parsed.path == "/api/f10_stock_info":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_stock_info(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_stock_info(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_topic_ids":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_topic_ids(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_topic_ids(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_finance_diagnosis":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_finance_diagnosis(
-                            str(payload.get("code") or ""),
-                            str(payload.get("section") or "zzyj"),
-                        )
+                self._ok(
+                    self.server.bridge.f10_finance_diagnosis(
+                        str(payload.get("code") or ""),
+                        str(payload.get("section") or "zzyj"),
                     )
+                )
                 return
             if parsed.path == "/api/f10_stock_score":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_stock_score(
-                            str(payload.get("code") or ""),
-                            str(payload.get("section") or "pf"),
-                            str(payload.get("arg") or ""),
-                        )
+                self._ok(
+                    self.server.bridge.f10_stock_score(
+                        str(payload.get("code") or ""),
+                        str(payload.get("section") or "pf"),
+                        str(payload.get("arg") or ""),
                     )
+                )
                 return
             if parsed.path == "/api/f10_topic_compare":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_topic_compare(
-                            str(payload.get("code") or ""),
-                            str(payload.get("topicId") or ""),
-                            str(payload.get("section") or "gndbzfsj"),
-                            str(payload.get("sortBy") or "zdf"),
-                        )
+                self._ok(
+                    self.server.bridge.f10_topic_compare(
+                        str(payload.get("code") or ""),
+                        str(payload.get("topicId") or ""),
+                        str(payload.get("section") or "gndbzfsj"),
+                        str(payload.get("sortBy") or "zdf"),
                     )
+                )
                 return
             if parsed.path == "/api/f10_allotment_dates":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_allotment_dates(str(payload.get("code") or ""))
-                    )
+                self._ok(
+                    self.server.bridge.f10_allotment_dates(str(payload.get("code") or ""))
+                )
                 return
             if parsed.path == "/api/f10_allotment_details":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_allotment_details(
-                            str(payload.get("code") or ""), str(payload.get("date") or "")
-                        )
+                self._ok(
+                    self.server.bridge.f10_allotment_details(
+                        str(payload.get("code") or ""), str(payload.get("date") or "")
                     )
+                )
                 return
             if parsed.path == "/api/f10_hq_nlp":
-                with self.server.lock:
-                    raw_days = payload.get("days")
-                    self._ok(
-                        self.server.bridge.f10_hq_nlp(
-                            str(payload.get("code") or ""),
-                            str(payload.get("reqId") or ""),
-                            int(raw_days) if raw_days not in (None, "") else None,
-                            int(payload.get("pageSize") or 10),
-                        )
+                raw_days = payload.get("days")
+                self._ok(
+                    self.server.bridge.f10_hq_nlp(
+                        str(payload.get("code") or ""),
+                        str(payload.get("reqId") or ""),
+                        int(raw_days) if raw_days not in (None, "") else None,
+                        int(payload.get("pageSize") or 10),
                     )
+                )
                 return
             if parsed.path == "/api/f10_board_member_quotes":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_board_member_quotes(
-                            str(payload.get("boardCode") or ""),
-                            int(payload.get("boardMarket") or 1),
-                        )
+                self._ok(
+                    self.server.bridge.f10_board_member_quotes(
+                        str(payload.get("boardCode") or ""),
+                        int(payload.get("boardMarket") or 1),
                     )
+                )
                 return
             if parsed.path == "/api/f10_limit_board_ladder":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_limit_board_ladder(
-                            payload.get("startDate"),
-                            payload.get("endDate"),
-                            bool(payload.get("includeSummary")),
-                        )
+                self._ok(
+                    self.server.bridge.f10_limit_board_ladder(
+                        payload.get("startDate"),
+                        payload.get("endDate"),
+                        bool(payload.get("includeSummary")),
                     )
+                )
                 return
             if parsed.path == "/api/f10_finance_weights":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_finance_weights(
-                            str(payload.get("code") or ""),
-                            str(payload.get("section") or "zcfzb"),
-                        )
+                self._ok(
+                    self.server.bridge.f10_finance_weights(
+                        str(payload.get("code") or ""),
+                        str(payload.get("section") or "zcfzb"),
                     )
+                )
                 return
             if parsed.path == "/api/f10_industry_page":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_industry_page(
-                            str(payload.get("hy") or ""),
-                            str(payload.get("section") or "hqtj"),
-                        )
+                self._ok(
+                    self.server.bridge.f10_industry_page(
+                        str(payload.get("hy") or ""),
+                        str(payload.get("section") or "hqtj"),
                     )
+                )
                 return
             if parsed.path == "/api/f10_digest":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_digest(
-                            payload.get("code", ""), payload.get("section", "tips")
-                        )
+                self._ok(
+                    self.server.bridge.f10_digest(
+                        payload.get("code", ""), payload.get("section", "tips")
                     )
+                )
                 return
             if parsed.path == "/api/f10_market_news":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_market_news(
-                            int(payload.get("tab", 3)),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 50)),
-                        )
+                self._ok(
+                    self.server.bridge.f10_market_news(
+                        int(payload.get("tab", 3)),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 50)),
                     )
+                )
                 return
             if parsed.path == "/api/f10_channel_news":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_channel_news(
-                            int(payload.get("channel", 201)),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 50)),
-                            str(payload.get("keyword") or ""),
-                        )
+                self._ok(
+                    self.server.bridge.f10_channel_news(
+                        int(payload.get("channel", 201)),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 50)),
+                        str(payload.get("keyword") or ""),
                     )
+                )
                 return
             if parsed.path == "/api/f10_channel_news_archive_save":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_channel_news_archive_save(
-                            int(payload.get("channel", 201)),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 50)),
-                            str(payload.get("keyword") or ""),
-                        )
+                self._ok(
+                    self.server.bridge.f10_channel_news_archive_save(
+                        int(payload.get("channel", 201)),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 50)),
+                        str(payload.get("keyword") or ""),
                     )
+                )
                 return
             if parsed.path == "/api/f10_channel_news_archives":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_channel_news_archive_list(
-                            int(payload.get("limit", 50))
-                        )
+                self._ok(
+                    self.server.bridge.f10_channel_news_archive_list(
+                        int(payload.get("limit", 50))
                     )
+                )
                 return
             if parsed.path == "/api/f10_market_news_archive_save":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_market_news_archive_save(
-                            int(payload.get("tab", 3)),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 50)),
-                        )
+                self._ok(
+                    self.server.bridge.f10_market_news_archive_save(
+                        int(payload.get("tab", 3)),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 50)),
                     )
+                )
                 return
             if parsed.path == "/api/f10_market_news_archives":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_market_news_archive_list(
-                            int(payload.get("limit", 50))
-                        )
+                self._ok(
+                    self.server.bridge.f10_market_news_archive_list(
+                        int(payload.get("limit", 50))
                     )
+                )
                 return
             if parsed.path == "/api/f10_market_report":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_market_report(
-                            str(payload.get("code") or ""),
-                            str(payload.get("section") or "board_info"),
-                            str(payload.get("arg") or ""),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 20)),
-                        )
+                self._ok(
+                    self.server.bridge.f10_market_report(
+                        str(payload.get("code") or ""),
+                        str(payload.get("section") or "board_info"),
+                        str(payload.get("arg") or ""),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 20)),
                     )
+                )
                 return
             if parsed.path == "/api/f10_market_report_archive_save":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_market_report_archive_save(
-                            str(payload.get("code") or ""),
-                            str(payload.get("section") or "board_info"),
-                            str(payload.get("arg") or ""),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 20)),
-                        )
+                self._ok(
+                    self.server.bridge.f10_market_report_archive_save(
+                        str(payload.get("code") or ""),
+                        str(payload.get("section") or "board_info"),
+                        str(payload.get("arg") or ""),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 20)),
                     )
+                )
                 return
             if parsed.path == "/api/f10_market_report_archives":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_market_report_archive_list(
-                            int(payload.get("limit", 50))
-                        )
+                self._ok(
+                    self.server.bridge.f10_market_report_archive_list(
+                        int(payload.get("limit", 50))
                     )
+                )
                 return
             if parsed.path == "/api/f10_profit_forecast":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_profit_forecast(
-                            payload.get("code", ""), payload.get("section", "ylyctj")
-                        )
+                self._ok(
+                    self.server.bridge.f10_profit_forecast(
+                        payload.get("code", ""), payload.get("section", "ylyctj")
                     )
+                )
                 return
             if parsed.path == "/api/f10_governance":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_governance(
-                            payload.get("code", ""), payload.get("section", "gljy")
-                        )
+                self._ok(
+                    self.server.bridge.f10_governance(
+                        payload.get("code", ""), payload.get("section", "gljy")
                     )
+                )
                 return
             if parsed.path == "/api/f10_hot_topics":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_hot_topics(
-                            payload.get("code", ""), payload.get("section", "zttzbkz")
-                        )
+                self._ok(
+                    self.server.bridge.f10_hot_topics(
+                        payload.get("code", ""), payload.get("section", "zttzbkz")
                     )
+                )
                 return
             if parsed.path == "/api/f10_fund_report":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_fund_report(
-                            str(payload.get("code") or ""),
-                            str(payload.get("section") or "basic"),
-                            str(payload.get("arg") or ""),
-                            str(payload.get("date") or ""),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 20)),
-                        )
+                self._ok(
+                    self.server.bridge.f10_fund_report(
+                        str(payload.get("code") or ""),
+                        str(payload.get("section") or "basic"),
+                        str(payload.get("arg") or ""),
+                        str(payload.get("date") or ""),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 20)),
                     )
+                )
                 return
             if parsed.path == "/api/f10_detail_archive_save":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_detail_archive_save(
-                            str(payload.get("detailType") or ""),
-                            str(payload.get("recordId") or ""),
-                        )
+                self._ok(
+                    self.server.bridge.f10_detail_archive_save(
+                        str(payload.get("detailType") or ""),
+                        str(payload.get("recordId") or ""),
                     )
+                )
                 return
             if parsed.path == "/api/f10_detail_archives":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_detail_archive_list(
-                            int(payload.get("limit", 50))
-                        )
+                self._ok(
+                    self.server.bridge.f10_detail_archive_list(
+                        int(payload.get("limit", 50))
                     )
+                )
                 return
             if parsed.path == "/api/f10_detail":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_detail(
-                            str(payload.get("detailType") or ""),
-                            str(payload.get("recordId") or ""),
-                        )
+                self._ok(
+                    self.server.bridge.f10_detail(
+                        str(payload.get("detailType") or ""),
+                        str(payload.get("recordId") or ""),
                     )
+                )
                 return
             if parsed.path == "/api/f10_ranking_detail":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_ranking_detail(
-                            payload.get("code", ""), payload.get("section", "scpmdela")
-                        )
+                self._ok(
+                    self.server.bridge.f10_ranking_detail(
+                        payload.get("code", ""), payload.get("section", "scpmdela")
                     )
+                )
                 return
             if parsed.path == "/api/f10_northbound_holding":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_northbound_holding(
-                            payload.get("code", ""),
-                            payload.get("section", "bszj"),
-                            int(payload.get("page", 1)),
-                            int(payload.get("pageSize", 20)),
-                        )
+                self._ok(
+                    self.server.bridge.f10_northbound_holding(
+                        payload.get("code", ""),
+                        payload.get("section", "bszj"),
+                        int(payload.get("page", 1)),
+                        int(payload.get("pageSize", 20)),
                     )
+                )
                 return
             if parsed.path == "/api/f10_industry":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_industry(
-                            payload.get("code", ""), payload.get("section", "summary")
-                        )
+                self._ok(
+                    self.server.bridge.f10_industry(
+                        payload.get("code", ""), payload.get("section", "summary")
                     )
+                )
                 return
             if parsed.path == "/api/mac_boards":
                 with self.server.lock:
@@ -1622,6 +1681,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                             str(payload.get("period") or "day"),
                             int(payload.get("count") or 800),
                             str(payload.get("adjust") or "qfq"),
+                            bool(
+                                payload.get(
+                                    "skipExisting", payload.get("skip_existing", False)
+                                )
+                            ),
                         )
                     )
                 return
@@ -1681,72 +1745,60 @@ class ApiHandler(BaseHTTPRequestHandler):
                     )
                 return
             if parsed.path == "/api/market_breadth":
-                with self.server.lock:
-                    self._ok(self.server.bridge.market_breadth())
+                # 缓存在 server 上：多标签共享一轮扫描，按时段调整 TTL
+                self._ok(self.server.market_breadth())
                 return
             if parsed.path == "/api/f10_change_plans":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_change_plans(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_change_plans(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_controller":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_controller(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_controller(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_institutions":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_institutions(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_institutions(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_shareholder_changes":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_shareholder_changes(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_shareholder_changes(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_circulating_shareholders":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_circulating_shareholders(str(payload.get("code") or ""))
-                    )
+                self._ok(
+                    self.server.bridge.f10_circulating_shareholders(str(payload.get("code") or ""))
+                )
                 return
             if parsed.path == "/api/f10_capital":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_capital(
-                            str(payload.get("code") or ""), str(payload.get("section") or "structure")
-                        )
+                self._ok(
+                    self.server.bridge.f10_capital(
+                        str(payload.get("code") or ""), str(payload.get("section") or "structure")
                     )
+                )
                 return
             if parsed.path == "/api/f10_shareholder_count":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_shareholder_count(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_shareholder_count(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_dividend":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_dividend(str(payload.get("code") or "")))
+                self._ok(self.server.bridge.f10_dividend(str(payload.get("code") or "")))
                 return
             if parsed.path == "/api/f10_market":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_market(str(payload.get("section") or "basic")))
+                self._ok(self.server.bridge.f10_market(str(payload.get("section") or "basic")))
                 return
             if parsed.path == "/api/f10_lhb_market":
-                with self.server.lock:
-                    self._ok(self.server.bridge.f10_lhb_market())
+                self._ok(self.server.bridge.f10_lhb_market())
                 return
             if parsed.path == "/api/f10_trading":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_trading(
-                            payload.get("code", ""), str(payload.get("section", "margin"))
-                        )
+                self._ok(
+                    self.server.bridge.f10_trading(
+                        payload.get("code", ""), str(payload.get("section", "margin"))
                     )
+                )
                 return
             if parsed.path == "/api/f10_statement":
-                with self.server.lock:
-                    self._ok(
-                        self.server.bridge.f10_statement(
-                            payload.get("code", ""),
-                            str(payload.get("kind", "zcfzb")),
-                            bool(payload.get("full", False)),
-                        )
+                self._ok(
+                    self.server.bridge.f10_statement(
+                        payload.get("code", ""),
+                        str(payload.get("kind", "zcfzb")),
+                        bool(payload.get("full", False)),
                     )
+                )
                 return
             if parsed.path == "/api/stats_summary":
                 with self.server.lock:
