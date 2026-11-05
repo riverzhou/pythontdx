@@ -644,6 +644,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                         )
                     )
                 return
+            if parsed.path == "/api/server_speed_test":
+                with self.server.lock:
+                    self._ok(self.server.bridge.server_speed_test())
+                return
             if parsed.path == "/api/quotes":
                 codes = payload.get("codes") or []
                 if not isinstance(codes, list):
