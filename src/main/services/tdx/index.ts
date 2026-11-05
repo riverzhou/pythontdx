@@ -74,6 +74,7 @@ import type {
 } from '@shared/types'
 import type { ChartPatternsRequest, ChartPatternsResult } from '@shared/patterns'
 import type { CategoryRequest, TradesRequest } from '@shared/ipc'
+import { fetchLiveKline, type LiveKlineState } from '@shared/kline-live'
 import { splitCode } from '@shared/market'
 import { TtlCache } from '../cache'
 import { CODE_LIST_TIMEOUT_MS, QUOTES_TIMEOUT_MS, TdxBridge, TdxError } from './bridge'
@@ -89,14 +90,8 @@ const minuteCache = new TtlCache<MinuteTrend>(10_000)
 const fiveDayCache = new TtlCache<MultiDayTrend>(60_000)
 const klineCache = new TtlCache<KLineSeries>(60_000)
 
-/** 实时 K 线：首帧全量，之后每秒只取最近 20 根；每分钟补一次全量防断层 */
-const KLINE_TAIL_COUNT = 20
-const KLINE_FULL_REFRESH_MS = 60_000
-interface LiveKlineEntry {
-  series: KLineSeries
-  fullAt: number
-}
-const liveKlineCache = new Map<string, LiveKlineEntry>()
+/** 实时 K 线的增量策略与 Web 共用，见 @shared/kline-live */
+const liveKlineCache = new Map<string, LiveKlineState>()
 
 interface CodeIndex {
   byCode: Map<string, SecurityInfo>
@@ -718,23 +713,13 @@ export async function fetchKline(
   return klineCache.resolve(key, () => bridge.send<KLineSeries>('kline', request))
 }
 
-/** 按 `date` 合并 K 线；tail 只有最近 20 根，不能覆盖掉本地 800 根历史。 */
-function mergeBarLists(
-  base: KLineSeries['bars'],
-  incoming: KLineSeries['bars']
-): KLineSeries['bars'] {
-  const byDate = new Map(base.map((bar) => [bar.date, bar]))
-  for (const bar of incoming) byDate.set(bar.date, bar)
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
-}
-
 /**
  * 每秒推送给图表的 K 线：
  *  - 首帧由 fetchPushTask 调 fetchKline 拿全量；
  *  - 这里只取最近 20 根，并在主进程合并进 800 根缓存；
  *  - 每 60 秒补一次全量，避免 20 根窗口被长时间运行甩开。
  *
- * 这样图表每秒都能拿到最新一根，但 sidecar/IPC 不会每秒搬 800 根。
+ * 增量策略与 Web 共用 `fetchLiveKline`，这里只注入 IPC 拉取与主进程缓存。
  */
 export async function fetchKlineLive(
   code: string,
@@ -744,53 +729,17 @@ export async function fetchKlineLive(
   first = false
 ): Promise<KLineSeries> {
   assertSupported(code)
-  const safeCount = Math.min(800, Math.max(1, Math.trunc(count)))
-  const key = `${code}:${period}:${safeCount}:${adjust}`
-  const cached = liveKlineCache.get(key)
-
-  if (first || !cached || Date.now() - cached.fullAt >= KLINE_FULL_REFRESH_MS) {
-    const series = await bridge.send<KLineSeries>('kline', {
-      code,
-      period,
-      count: safeCount,
-      adjust
-    })
-    liveKlineCache.set(key, { series, fullAt: Date.now() })
-    return series
-  }
-
-  const tail = await bridge.send<KLineSeries>(
-    'kline',
-    { code, period, count: KLINE_TAIL_COUNT, adjust },
-    QUOTES_TIMEOUT_MS
+  return fetchLiveKline(
+    { code, period, count, adjust },
+    first,
+    (wanted, tail) =>
+      bridge.send<KLineSeries>(
+        'kline',
+        { code, period, count: wanted, adjust },
+        tail ? QUOTES_TIMEOUT_MS : undefined
+      ),
+    liveKlineCache
   )
-  const lastCached = cached.series.bars[cached.series.bars.length - 1]
-  /*
-   * tail 窗口 20 根；如果第一根都比本地最后一根新，说明已经超过 20 根没补，
-   * 再合并就会出现一段空洞。直接重取全量。
-   */
-  if (tail.bars.length >= KLINE_TAIL_COUNT && lastCached && tail.bars[0].date > lastCached.date) {
-    const series = await bridge.send<KLineSeries>('kline', {
-      code,
-      period,
-      count: safeCount,
-      adjust
-    })
-    liveKlineCache.set(key, { series, fullAt: Date.now() })
-    return series
-  }
-
-  cached.series = {
-    ...cached.series,
-    bars: mergeBarLists(cached.series.bars, tail.bars)
-  }
-  return {
-    code,
-    period,
-    bars: tail.bars,
-    source: 'network',
-    tail: true
-  }
 }
 
 /* ------------------------------------------------------------------ 分时 */
