@@ -475,6 +475,27 @@ export interface MarketBreadth {
   updatedAt: number
 }
 
+/** Python 侧用 TDX 数据生成的交易日历状态。 */
+export interface MarketCalendarStatus {
+  schema: string
+  /** 服务端认为的今天（YYYY-MM-DD） */
+  today: string
+  /** 最近一个交易日；today != lastTradingDay 表示今天休市 */
+  lastTradingDay: string
+  isTradingDay: boolean
+  /** TDX 官方节假日快照 + 用户追加休市日（YYYY-MM-DD） */
+  holidays: string[]
+  holidaySource: string
+  source: string
+  fetchedAt: number
+  /** 缓存日期不是本地日期时为 true；前端仍按 isTradingDay 判断 */
+  stale: boolean
+  error: string
+  time: string
+  date: string
+  session: string
+}
+
 export interface F10TradingTable {
   section: string
   rawColumns: string[]

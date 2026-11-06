@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 
+import trading_calendar
 from tdx_bridge import (
     Bridge,
     _merge_auction_quotes,
@@ -125,6 +126,9 @@ class MergeTests(unittest.TestCase):
 
 
 class ClockTests(unittest.TestCase):
+    def setUp(self):
+        trading_calendar.configure(None)
+
     def test_sessions(self):
         from datetime import datetime
 
@@ -141,6 +145,18 @@ class ClockTests(unittest.TestCase):
         self.assertEqual(at(15, 0), "trading")
         self.assertEqual(at(15, 1), "closed")
 
+    def test_tdx_holiday_is_not_trading(self):
+        holiday = datetime(2026, 2, 17, 10, 0, 0, tzinfo=_tz())
+        self.assertEqual(shanghai_clock(holiday)[1], "holiday")
+        normal = datetime(2026, 2, 24, 10, 0, 0, tzinfo=_tz())
+        self.assertEqual(shanghai_clock(normal)[1], "trading")
+
+    def test_next_boundary_skips_spring_festival(self):
+        start = datetime(2026, 2, 16, 12, 0, 0, tzinfo=_tz())
+        # 2/16 12:00 → 2/24 09:15（春节 2/15–2/23 休市）
+        expected = (7 * 24 + 21.25) * 60 * 60 * 1000
+        self.assertAlmostEqual(ms_until_session_change(start), expected, delta=1)
+
 
 def _tz():
     from datetime import timedelta, timezone
@@ -149,6 +165,9 @@ def _tz():
 
 
 class SessionBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        trading_calendar.configure(None)
+
     def test_boundary_before_open_and_lunch(self):
         before_open = datetime(2026, 11, 5, 9, 29, 0, tzinfo=_tz())
         self.assertAlmostEqual(ms_until_session_change(before_open), 60_000, delta=1)

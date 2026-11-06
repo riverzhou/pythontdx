@@ -5,9 +5,9 @@
 
 `Electron` · `Vite` · `SolidJS` · `TypeScript` · `Python` · `7709 / MAC / 7615`
 
-**v1.5.0** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64
+**v1.6.0** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64
 
-`npm run check` **366 TS（364 通过 / 2 skipped）+ 324 Python（323 通过 / 1 skipped）**
+`npm run check` **369 TS（367 通过 / 2 skipped）+ 331 Python（330 通过 / 1 skipped）**
 
 [GitHub Releases](https://github.com/riverzhou/pythontdx/releases) ·
 [前后端边界](docs/23-前后端边界与双端一致性.md) ·
@@ -18,7 +18,7 @@
 
 ## 一眼看懂
 
-![pythontdx 主界面](docs/assets/pythontdx-1.5-overview.png)
+![pythontdx 主界面](docs/assets/pythontdx-1.6-overview.png)
 
 - **实时行情**：1 秒刷新；分时、五日、K 线、九宫格同一节奏；
 - **数据工具**：24 个离线数据集，日 K 与 1 分钟 K 独立勾选，多进程 × 多线程 × 多服务器并行；
@@ -29,11 +29,24 @@
 
 ### Web 端：同一套界面、同一份数据
 
-![pythontdx Web 端](docs/assets/pythontdx-1.5-web.png)
+![pythontdx Web 端](docs/assets/pythontdx-1.6-web.png)
 
 浏览器打开 `python/tdx_server.py --web-dir out/web` 的同一端口即可使用；
 2026-11-06 验收时桌面与 Web 同时显示 `sh000001` 3647.90、涨 911/跌 4548，
-K 线/分时/逐笔/盘口一致，右下角版本分别为 `v1.5.0` 与 `v1.5.0-web`。
+K 线/分时/逐笔/盘口一致（截图采集于 1.6.0）。
+
+## 1.6.0 重点：TDX 交易日历 + 部署模式收口
+
+- **不再手写节假日表**：内置通达信官方 `Except2025/2026.zip` 里的
+  `neednote_RecentHSHoliday.txt` 快照，再用 MAC `0x120F` 的
+  `today` / `lastTradingDay` 识别临时休市；
+- **全链路生效**：桌面 Poller、Web SSE/WS、分时/K 线/逐笔刷新、离线同步
+  08:45–15:45 保护窗口都使用同一份日历；节假日显示「节假日休市」，轮询自动降频；
+- **新增接口**：`market_status` 命令 / `POST /api/market_status`，启动与每 5 分钟刷新；
+- **部署模式**：Electron 桌面与 Web **二选一，不同时使用**；同机只允许一个
+  Python 后端持有 7709 连接（`PRINCIPLES.md` A6）。
+- 未来年份未覆盖时按工作日 + 服务端状态，不伪造交易日；可在
+  `<数据目录>/trading_holidays.json` 追加临时休市日。
 
 ## 1.5.0 重点：PR 收口 + 数据逻辑归 Python
 
@@ -84,7 +97,7 @@ K 线/分时/逐笔/盘口一致，右下角版本分别为 `v1.5.0` 与 `v1.5.0
 
 ### 主图：指数 K 线、成交量、盘口
 
-![指数 K 线与成交量](docs/assets/pythontdx-1.5-overview.png)
+![指数 K 线与成交量](docs/assets/pythontdx-1.6-overview.png)
 
 主图上方是今开/最高/最低/昨收、换手、量比、振幅、均价、涨停/跌停、成交量/成交额；
 右侧五档盘口 + 明细/指标/分价/资金/竞价页签；下方成交量与 MACD 副图。
@@ -355,6 +368,7 @@ docs/            是什么、为什么、协议与发布记录
 | [docs/22-前端设计与开发方案](docs/22-前端设计与开发方案.md) | 界面结构、设计令牌、图表、状态 |
 | [docs/23-前后端边界与双端一致性](docs/23-前后端边界与双端一致性.md) | TS/Python 边界、映射、核对表 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更 |
+| [RELEASE_NOTES-1.6.0.md](RELEASE_NOTES-1.6.0.md) | 1.6.0 发布说明 |
 | [RELEASE_NOTES-1.5.0.md](RELEASE_NOTES-1.5.0.md) | 1.5.0 发布说明 |
 
 ---
@@ -368,6 +382,7 @@ docs/            是什么、为什么、协议与发布记录
 - 7615 没有公开并发/限流文档，线程数过大可能被限流；失败会在下次续跑。
 - 退市代码不在当前代码表里，`delisted` 必须显式提供代码。
 - `volume_profile`（0x051a）在免费主站全部超时，不进预设。
-- 节假日表缺省只按周末判断；需要精确判断时在数据目录放 `trading_holidays.json`。
-- 桌面与 Web 各自启动一个 Python 后端进程；同机同时运行时会有两条 7709 连接，
-  长期目标是单后端 + 桌面连 HTTP（见 `PLAN.md` 技术债）。
+- 交易日历内置 2025/2026 TDX 官方快照；未来年份未覆盖时按工作日 + `0x120F`，
+  可在数据目录放 `trading_holidays.json` 追加临时休市日。
+- **桌面与 Web 二选一部署，不同时使用**：同一台机器只允许一个 Python 后端持有 7709 连接；
+  两种模式共用同一批 Python 数据方法，但不设计双开后端/共享缓存（见 `PRINCIPLES.md` A6）。

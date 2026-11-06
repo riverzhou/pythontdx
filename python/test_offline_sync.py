@@ -131,6 +131,13 @@ class TestOfflineWindow(unittest.TestCase):
         self.assertTrue(state["open"])
         self.assertFalse(state["tradingDay"])
 
+    def test_tdx_official_holiday_suppresses_guard(self):
+        # 2026 春节：TDX Except2026.zip 的 neednote_RecentHSHoliday.txt
+        state = self.state("2026-02-17T10:00:00")
+        self.assertTrue(state["open"])
+        self.assertFalse(state["tradingDay"])
+        self.assertEqual(state["pauseAt"], "2026-02-24T08:45:00+08:00")
+
 
 class TestNormalizeOptions(unittest.TestCase):
     def test_clamps_and_rejects(self):

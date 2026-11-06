@@ -17,6 +17,7 @@ import type {
   F10Announcement,
   F10NewsItem,
   MarketBreadth,
+  MarketCalendarStatus,
   LocalDayBar,
   LocalDayResult,
   DataBackupCreateResult,
@@ -414,6 +415,10 @@ async function scanMarketBreadth(): Promise<MarketBreadth> {
 
 /** 多窗口共用一轮扫描，避免主窗口/独立窗口各自开扫。 */
 let breadthInFlight: Promise<MarketBreadth> | null = null
+
+export async function fetchMarketStatus(force = false): Promise<MarketCalendarStatus> {
+  return bridge.send<MarketCalendarStatus>('market_status', { force }, 30_000)
+}
 
 export function fetchMarketBreadth(): Promise<MarketBreadth> {
   if (!breadthInFlight) {

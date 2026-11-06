@@ -2,7 +2,7 @@
  * 市场相关的纯函数：代码归一化、市场推断、交易时段判断。
  * 不依赖任何运行时 API，主进程与渲染进程共用。
  */
-import type { Market } from './types'
+import type { Market, MarketCalendarStatus } from './types'
 
 /** 各市场代码前缀 → 市场 */
 const PREFIX_TO_MARKET: Record<string, Market> = {
@@ -116,14 +116,21 @@ const SHANGHAI_PARTS = new Intl.DateTimeFormat('en-US', {
   hour12: false
 })
 
-export type MarketSession = 'pre-open' | 'trading' | 'lunch-break' | 'closed' | 'weekend'
+export type MarketSession =
+  | 'pre-open'
+  | 'trading'
+  | 'lunch-break'
+  | 'closed'
+  | 'weekend'
+  | 'holiday'
 
 export const SESSION_LABEL: Record<MarketSession, string> = {
   'pre-open': '集合竞价',
   trading: '交易中',
   'lunch-break': '午间休市',
   closed: '已收盘',
-  weekend: '周末休市'
+  weekend: '周末休市',
+  holiday: '节假日休市'
 }
 
 const WEEKDAY_LABEL: Record<string, string> = {
@@ -134,6 +141,32 @@ const WEEKDAY_LABEL: Record<string, string> = {
   Fri: '周五',
   Sat: '周六',
   Sun: '周日'
+}
+
+/**
+ * 通达信交易日历状态（由 Python `market_status` 提供）。
+ *
+ * 前端仍保留纯时钟函数，但节假日必须以 TDX 的今天/最近交易日为准；
+ * 状态每 5 分钟刷新一次，更新后所有组件共用同一份。
+ */
+let marketCalendar: MarketCalendarStatus | null = null
+let marketHolidays = new Set<string>()
+
+export function setMarketCalendarStatus(status: MarketCalendarStatus | null): void {
+  marketCalendar = status
+  marketHolidays = new Set(status?.holidays ?? [])
+}
+
+export function currentMarketCalendarStatus(): MarketCalendarStatus | null {
+  return marketCalendar
+}
+
+/** 当前日期被 TDX 明确判为休市（周末另判）。 */
+function isCalendarHoliday(date: string, weekday: number): boolean {
+  if (weekday === 0 || weekday === 6) return false
+  if (marketHolidays.has(date)) return true
+  if (!marketCalendar || marketCalendar.today !== date) return false
+  return !marketCalendar.isTradingDay
 }
 
 export interface ShanghaiClock {
@@ -171,10 +204,10 @@ export function shanghaiClock(now: Date = new Date()): ShanghaiClock {
 }
 
 /**
- * 粗略判断 A 股当前所处的时段。
+ * 判断 A 股当前所处的时段。
  *
- * 只按星期与时钟判断，**不含法定节假日**：工作日的节假日仍会显示交易时段，
- * 这是已知边界（与 Python `shanghai_clock` 一致）。要精确判断需引入交易日历。
+ * 周末与时钟是本地纯函数；节假日来自 Python `market_status` 的 TDX 日历状态，
+ * 未加载时按工作日兜底，加载后返回 `holiday`（「节假日休市」）。
  */
 export function marketSession(now: Date = new Date()): MarketSession {
   const parts = SHANGHAI_PARTS.formatToParts(now)
@@ -183,8 +216,11 @@ export function marketSession(now: Date = new Date()): MarketSession {
   const hour = Number(get('hour')) % 24
   const minute = Number(get('minute'))
   const hm = hour * 60 + minute
+  const date = `${get('year')}-${get('month')}-${get('day')}`
+  const weekdayIndex = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday)
 
   if (weekday === 'Sat' || weekday === 'Sun') return 'weekend'
+  if (isCalendarHoliday(date, weekdayIndex)) return 'holiday'
   if (hm >= 9 * 60 + 15 && hm < 9 * 60 + 30) return 'pre-open'
   if (hm >= 9 * 60 + 30 && hm < 11 * 60 + 30) return 'trading'
   if (hm >= 11 * 60 + 30 && hm < 13 * 60) return 'lunch-break'
@@ -207,7 +243,8 @@ const SESSION_BOUNDARIES: ReadonlyArray<readonly [number, number]> = [
  *
  * 行情轮询在午休/收盘会降频到 30 秒；如果恰好在 12:59:30 之后进入低频，
  * 13:00 开盘可以被拖到 13:00:30 才恢复 1 秒推送。用它把定时器压在时段边界上。
- * 不处理法定节假日：节假日仍按工作日边界唤醒，最多多拉几帧，不影响正确性。
+ * 使用 TDX 交易日历跳过已确认的节假日；未来尚未确认的日期仍按工作日
+ * 唤醒一次，等下一次 market_status 刷新后再修正。
  */
 export function msUntilSessionChange(now: Date = new Date()): number {
   const shanghai = new Date(now.getTime() + SHANGHAI_OFFSET_MS)
@@ -216,10 +253,12 @@ export function msUntilSessionChange(now: Date = new Date()): number {
   const day = shanghai.getUTCDate()
   let best = Number.POSITIVE_INFINITY
 
-  for (let offset = 0; offset < 8; offset += 1) {
+  for (let offset = 0; offset < 40; offset += 1) {
     const date = new Date(Date.UTC(year, month, day + offset))
     const weekday = date.getUTCDay()
     if (weekday === 0 || weekday === 6) continue
+    const dateText = date.toISOString().slice(0, 10)
+    if (isCalendarHoliday(dateText, weekday)) continue
     for (const [hour, minute] of SESSION_BOUNDARIES) {
       const at = Date.UTC(year, month, day + offset, hour, minute) - SHANGHAI_OFFSET_MS
       const delta = at - now.getTime()

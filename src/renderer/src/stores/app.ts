@@ -23,6 +23,7 @@ import {
 } from '@shared/types'
 import { mergeImportedGroups } from '@shared/watchlist'
 import { localDateKey, shouldAutoArchive } from '@shared/archive'
+import { setMarketCalendarStatus } from '@shared/market'
 import { api } from '../lib/ipc'
 
 const [state, setState] = createStore<AppState>({
@@ -123,6 +124,21 @@ export async function bootstrapAppState(): Promise<void> {
   // 告诉 CSS 当前平台，macOS 需要给原生红绿灯留位置
   document.documentElement.dataset.platform = info.platform
   setReady(true)
+}
+
+/** 交易日历每 5 分钟刷新一次；主进程也在启动时预热一份。 */
+let calendarTimer: ReturnType<typeof setInterval> | null = null
+export function startMarketCalendar(): void {
+  if (calendarTimer) return
+  const refresh = (): void => {
+    void api.market
+      .status()
+      .then((status) => setMarketCalendarStatus(status))
+      .catch(() => undefined)
+  }
+  // 首帧行情优先：日历状态晚 1 秒再拉，避免和 sidecar 首批行情抢队列。
+  setTimeout(refresh, 1000)
+  calendarTimer = setInterval(refresh, 5 * 60_000)
 }
 
 /* ------------------------------------------------------------------ 选中 */

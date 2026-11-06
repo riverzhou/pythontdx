@@ -66,6 +66,7 @@ from tdx_mac import (
 )
 from local_import import import_local_file
 from kline_export import write_kline_export
+import trading_calendar
 from parquet_store import ParquetStoreError, read_bars, write_bars
 from auction_archive import (
     AuctionArchiveError,
@@ -401,6 +402,8 @@ def shanghai_clock(now: datetime | None = None) -> tuple[str, str]:
     hm = moment.hour * 60 + moment.minute
     if moment.weekday() >= 5:
         session = "weekend"
+    elif not trading_calendar.is_trading_day(moment.date()):
+        session = "holiday"
     elif 9 * 60 + 15 <= hm < 9 * 60 + 30:
         session = "pre-open"
     elif 9 * 60 + 30 <= hm < 11 * 60 + 30:
@@ -419,7 +422,10 @@ SESSION_BOUNDARIES = ((9, 15), (9, 30), (11, 30), (13, 0), (15, 0))
 
 
 def ms_until_session_change(now: datetime | None = None) -> float:
-    """距离下一次交易时段切换还有多少毫秒（不含法定节假日）。
+    """距离下一次交易时段切换还有多少毫秒。
+
+    使用通达信交易日历跳过周末与节假日；未来日期若尚未从 TDX 拿到状态，
+    仍按工作日边界唤醒一次，等下一次 market_status 刷新后再修正。
 
     订阅线程在午休/收盘会降到 30 秒以上；若低频等待恰好跨过 13:00 或
     09:30，开盘第一帧会被拖后。轮询等待用这个值封顶，在边界后 250ms 内
@@ -431,9 +437,9 @@ def ms_until_session_change(now: datetime | None = None) -> float:
     else:
         moment = moment.astimezone(SHANGHAI_TZ)
     best = float("inf")
-    for offset in range(8):
+    for offset in range(40):
         day = (moment + timedelta(days=offset)).date()
-        if day.weekday() >= 5:
+        if not trading_calendar.is_trading_day(day):
             continue
         for hour, minute in SESSION_BOUNDARIES:
             at = datetime(
@@ -4353,6 +4359,7 @@ class Bridge:
         # TdxConnection 仍会按 endpoints 列表继续换站。
         self.preferred_host = host or _preferred_host()
         self.conn = TdxConnection(_ordered_endpoints(self.preferred_host))
+        trading_calendar.configure(pythontdx_data_dir() / "cache" / "trading_calendar.json")
         self.money_conn: TdxConnection | None = None
         self.index = CodeIndex()
         if index_items:
@@ -4584,6 +4591,50 @@ class Bridge:
 
         body = self._mac_request(0x120F, bytes(DEFAULT_SERVER_INFO_PAYLOAD))
         return parse_server_info(body)
+
+    def market_status(self, force: bool = False) -> dict:
+        """TDX 交易日历状态：官方节假日文件 + MAC 0x120F。
+
+        每个自然日只请求一次 0x120F（首次/跨日/force）；同一天内复用落盘
+        状态。网络失败时保留上一份，错误挂在状态里，前端仍可按工作日兜底。
+        """
+        now = datetime.now(SHANGHAI_TZ)
+        state = trading_calendar.snapshot()
+        today = now.date().isoformat()
+        need_refresh = force or state is None or state.today != today
+        if need_refresh:
+            try:
+                info = self.mac_server_info()
+                server_today = str(info.get("today") or today)[:10]
+                last = str(info.get("lastTradingDay") or server_today)[:10]
+                trading_calendar.update(
+                    server_today,
+                    last,
+                    "TDX MAC 0x120F + Except<year>.zip holidays",
+                )
+            except Exception as error:  # noqa: BLE001 - 日历失败不能阻断行情
+                trading_calendar.record_error(str(error))
+        result = trading_calendar.status(now, self._user_holidays())
+        _time, session = shanghai_clock(now)
+        result.update({"time": _time, "date": today, "session": session})
+        return result
+
+    @staticmethod
+    def _user_holidays() -> set[str]:
+        """可选的本机追加休市日；与离线同步共用同一个文件。"""
+        path = pythontdx_data_dir() / "trading_holidays.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        values = payload.get("holidays") if isinstance(payload, dict) else payload
+        if not isinstance(values, list):
+            return set()
+        return {
+            str(value).strip()[:10]
+            for value in values
+            if isinstance(value, str) and len(str(value).strip()) >= 10
+        }
 
     def mac_symbol_info(self, code: str) -> dict:
         from tdx_mac_ext import _symbol_info_request, parse_symbol_info
@@ -8478,6 +8529,8 @@ def dispatch(bridge: Bridge, cmd: str, payload: dict) -> object:
         return "pong"
     if cmd == "server_speed_test":
         return bridge.server_speed_test()
+    if cmd == "market_status":
+        return bridge.market_status(bool(payload.get("force")))
     if cmd == "select_server":
         return bridge.select_server(str(payload.get("host") or ""))
     if cmd == "code_list":

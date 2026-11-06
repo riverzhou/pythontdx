@@ -95,11 +95,19 @@ contextBridge.exposeInMainWorld('api', { window: { minimize: () => ... } })
 contextBridge.exposeInMainWorld('ipcRenderer', ipcRenderer)
 ```
 
-### A6 · 单一数据后端
+### A6 · 单一数据后端；桌面与 Web 二选一部署
 
 同一台机器只允许一个 Python 后端实例持有通达信连接与写入队列。
 桌面端自动拉起后端时，如果端口已被占用，要复用/接管而不是再起一套；
 Web 端连接已有后端，不允许每个标签页各连一套。
+
+**部署模式二选一**：产品设计上 Electron 桌面端与 Web 端**不同时使用**，用户按场景选择一种：
+
+- 桌面模式：Electron 拉起 stdio sidecar，数据只走 IPC；
+- Web 模式：单独运行 `tdx_server.py`，浏览器走 HTTP/SSE/WS。
+
+不要为了「双开」设计共享内存、跨进程缓存或双后端协调；同时运行属于未定义行为。
+这与 A2/A8 不矛盾：两种模式共用同一批 Python 数据方法，但部署上只选一个。
 
 ### A7 · 双前端同构
 

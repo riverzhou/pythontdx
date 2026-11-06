@@ -42,6 +42,7 @@ def sidecar_cache_tag() -> str:
         digest.update(path.name.encode("utf-8"))
         digest.update(path.read_bytes())
     digest.update((ROOT / "connect.cfg").read_bytes())
+    digest.update((ROOT / "fixtures" / "tdx_holidays.json").read_bytes())
     return digest.hexdigest()[:16]
 
 
@@ -99,6 +100,8 @@ def build_nuitka() -> None:
         "--nofollow-import-to=tkinter",
         # 客户端解包的主站列表随 sidecar 一起分发，用户目录没有 connect.cfg 时仍可用。
         f"--include-data-files={ROOT / 'connect.cfg'}=connect.cfg",
+        # TDX 官方节假日快照；sidecar 解包后与可执行文件同目录。
+        f"--include-data-files={ROOT / 'fixtures' / 'tdx_holidays.json'}=tdx_holidays.json",
     ]
 
     # onefile 每次启动都解包约 90MB；48 个 worker 同时启动会把 CPU/磁盘打满，

@@ -49,6 +49,7 @@ import {
   fetchF10Industry,
   fetchF10Trading,
   fetchMarketBreadth,
+  fetchMarketStatus,
   fetchLocalDay,
   fetchLocalImport,
   fetchLocalQuery,
@@ -242,6 +243,10 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(IPC.f10ChangePlans, (_event, code: string) => fetchF10ChangePlans(code))
 
   ipcMain.handle(IPC.marketBreadth, () => fetchMarketBreadth())
+
+  ipcMain.handle(IPC.marketStatus, (_event, force?: boolean) =>
+    fetchMarketStatus(force === true)
+  )
 
   ipcMain.handle(IPC.localDayRead, (_event, path: string, limit?: number) =>
     fetchLocalDay(path, limit)

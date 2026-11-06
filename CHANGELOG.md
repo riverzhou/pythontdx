@@ -10,6 +10,41 @@ pythontdx 的所有重要变更都记录在这里。
 
 ---
 
+## [1.6.0] - 2026-11-06
+
+### 新增
+
+- **TDX 交易日历**：
+  - 内置通达信官方 `Except<year>.zip` / `neednote_RecentHSHoliday.txt`
+    的 2025/2026 节假日快照（`python/fixtures/tdx_holidays.json`）；
+  - MAC `0x120F` 的 `today` / `lastTradingDay` 识别官方文件之外的临时休市；
+  - 新增 `market_status` 命令 / `POST /api/market_status`；桌面与 Web 启动后
+    每 5 分钟刷新，`marketSession` 增加 `holiday`（「节假日休市」）；
+  - 离线同步的 08:45–15:45 保护窗口、桌面 Poller、Web SSE/WS、
+    分时/K 线/逐笔刷新节奏都使用同一份交易日历；
+  - 用户仍可在 `<数据目录>/trading_holidays.json` 追加休市日。
+- **部署模式约束**：设计上 Electron 桌面与 Web **二选一，不同时使用**；
+  同机只允许一个 Python 后端持有 7709 连接。写入 `PRINCIPLES.md` A6、
+  `docs/02`、`docs/23`、README 与 AGENTS。
+
+### 变更
+
+- 交易日历来源登记到 `docs/08`（TDX 官方通知 + Except2025/2026 + 上交所休市安排）。
+- 内置快照随 sidecar 打包；`python/build.py` 的缓存指纹包含该文件。
+
+### 验证
+
+- `npm run check` 全绿：369 TS（367 通过 / 2 skipped）+ 331 Python
+  （330 通过 / 1 skipped）。
+- 实机 `market_status(force=True)`：0x120F `today=lastTradingDay=2026-11-06`，
+  47 个 TDX 节假日日期；`session=lunch-break`。
+- 新增：官方节假日解析、0x120F 状态、`holiday` 会话、春节/国庆边界、
+  离线窗口、Web/桌面 `market_status` 契约测试。
+- Windows 本机构建与启动验收见 `docs/07` 第四十八节；tag `v1.6.0` 的
+  GitHub Actions 三平台发布。
+
+---
+
 ## [1.5.0] - 2026-11-06
 
 ### 新增

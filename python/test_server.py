@@ -143,6 +143,24 @@ class FakeBridge:
     def local_day_read(self, path, limit=0):
         return {"path": path, "count": 1, "firstDate": "2026-01-01", "lastDate": "2026-01-01", "bars": []}
 
+    def market_status(self, force=False):
+        return {
+            "schema": "pythontdx.trading_calendar.v1",
+            "today": "2026-11-06",
+            "lastTradingDay": "2026-11-06",
+            "isTradingDay": True,
+            "holidays": ["2026-10-05"],
+            "holidaySource": "fake",
+            "source": "fake",
+            "fetchedAt": 0,
+            "stale": False,
+            "error": "",
+            "time": "10:00:00",
+            "date": "2026-11-06",
+            "session": "trading",
+            "force": force,
+        }
+
     def kline_cached(
         self, code, period="day", count=200, adjust="qfq", cache_only=False, anchor_date=None, fresh=False, start=0
     ):
@@ -425,6 +443,15 @@ class TestHttpApi(unittest.TestCase):
         self.assertTrue(bridge.calls[1][1])
         self.assertFalse(bridge.calls[2][1])
 
+    def test_market_status_route(self):
+        status, payload, _ = self.request("POST", "/api/market_status", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["result"]["isTradingDay"])
+        self.assertIn("2026-10-05", payload["result"]["holidays"])
+        status, payload, _ = self.request("POST", "/api/market_status", {"force": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["result"]["force"])
+
     def test_kline_live_route(self):
         status, payload, _ = self.request(
             "POST",
@@ -647,6 +674,10 @@ class TestQuoteInterval(unittest.TestCase):
 
     def test_lunch_break_also_scales(self):
         with patch("tdx_server.shanghai_clock", return_value=("12:00:00", "lunch-break")):
+            self.assertEqual(_quote_interval(1.0), 30.0)
+
+    def test_holiday_also_scales(self):
+        with patch("tdx_server.shanghai_clock", return_value=("10:00:00", "holiday")):
             self.assertEqual(_quote_interval(1.0), 30.0)
 
 

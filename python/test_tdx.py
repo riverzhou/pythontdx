@@ -17,6 +17,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 import tdx_bridge as tdx
+import trading_calendar
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -1163,6 +1164,36 @@ class TestBridgeDataCache(unittest.TestCase):
 
     def setUp(self) -> None:
         self.bridge = tdx.Bridge()
+        self.calendar_dir = tempfile.TemporaryDirectory()
+        trading_calendar.configure(
+            Path(self.calendar_dir.name) / "trading_calendar.json"
+        )
+
+    def tearDown(self) -> None:
+        trading_calendar.configure(None)
+        self.calendar_dir.cleanup()
+
+    def test_market_status_uses_tdx_server(self) -> None:
+        self.bridge.mac_server_info = lambda: {
+            "today": "2026-02-17",
+            "lastTradingDay": "2026-02-13",
+        }
+        status = self.bridge.market_status(force=True)
+        self.assertEqual(status["today"], "2026-02-17")
+        self.assertEqual(status["lastTradingDay"], "2026-02-13")
+        self.assertFalse(status["isTradingDay"])
+        self.assertIn("2026-02-17", status["holidays"])
+        # 同一天再次调用不应重复拉日线/服务端信息
+        self.bridge.mac_server_info = lambda: (_ for _ in ()).throw(RuntimeError("should not call"))
+        cached = self.bridge.market_status()
+        self.assertEqual(cached["today"], "2026-02-17")
+
+    def test_bundled_tdx_holiday_without_network(self) -> None:
+        from datetime import date
+
+        self.assertFalse(trading_calendar.is_trading_day(date(2026, 2, 17)))
+        self.assertTrue(trading_calendar.is_trading_day(date(2026, 2, 24)))
+        self.assertFalse(trading_calendar.is_trading_day(date(2026, 10, 5)))
 
     def test_kline_cached_reuses_within_ttl_and_fresh_bypasses(self) -> None:
         calls: list[int] = []

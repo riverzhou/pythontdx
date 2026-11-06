@@ -60,7 +60,8 @@ import {
   toggleTheme,
   updateSettings,
   watchCodes,
-  startAutoArchive
+  startAutoArchive,
+  startMarketCalendar
 } from './stores/app'
 import {
   applyQuotes,
@@ -115,6 +116,7 @@ export default function App(): JSX.Element {
     startClock()
     startScreenTracking()
     startAutoArchive()
+    startMarketCalendar()
     initWindowSync()
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!appReady() || event.metaKey || event.ctrlKey || event.altKey) return

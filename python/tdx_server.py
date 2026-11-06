@@ -728,6 +728,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 with self.server.lock:
                     self._ok(self.server.bridge.server_speed_test())
                 return
+            if parsed.path == "/api/market_status":
+                with self.server.lock:
+                    self._ok(self.server.bridge.market_status(bool(payload.get("force"))))
+                return
             if parsed.path == "/api/quotes":
                 codes = payload.get("codes") or []
                 if not isinstance(codes, list):

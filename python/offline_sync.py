@@ -47,6 +47,7 @@ from typing import Any, Callable
 
 from data_paths import data_dir
 from protocol_archive import write_dataset_archive
+import trading_calendar
 
 SHANGHAI = timezone(timedelta(hours=8))
 WINDOW_START = dtime(8, 45)
@@ -304,6 +305,12 @@ def _holiday_file(root: Path | None = None) -> Path:
     return (Path(root) if root else data_dir()) / "trading_holidays.json"
 
 
+def _configure_calendar(root: Path | None = None) -> None:
+    trading_calendar.configure(
+        (Path(root) if root else data_dir()) / "cache" / "trading_calendar.json"
+    )
+
+
 def load_holidays(root: Path | None = None) -> set[str]:
     """读取可选节假日表：{"holidays": ["2026-01-01", ...]}。
 
@@ -329,6 +336,7 @@ def load_holidays(root: Path | None = None) -> set[str]:
 
 def recent_trading_days(count: int = 20, root: Path | None = None) -> list[str]:
     """最近 N 个交易日（含今天；15:00 前不含今天），按升序返回。"""
+    _configure_calendar(root)
     holidays = load_holidays(root)
     current = _shanghai_now()
     day = current.date()
@@ -343,9 +351,10 @@ def recent_trading_days(count: int = 20, root: Path | None = None) -> list[str]:
 
 
 def is_trading_day(day: date, holidays: set[str] | None = None) -> bool:
-    if day.weekday() >= 5:
-        return False
-    return day.isoformat() not in (holidays if holidays is not None else load_holidays())
+    """周末 + 通达信交易日历 + 用户追加休市日。"""
+    return trading_calendar.is_trading_day(
+        day, holidays if holidays is not None else load_holidays()
+    )
 
 
 def _next_trading_day(day: date, holidays: set[str]) -> date:
@@ -365,6 +374,7 @@ def offline_window(
     if current.tzinfo is None:
         current = current.replace(tzinfo=SHANGHAI)
     current = current.astimezone(SHANGHAI)
+    _configure_calendar(root)
     holidays = load_holidays(root)
     trading = is_trading_day(current.date(), holidays)
     clock = current.time().replace(tzinfo=None)

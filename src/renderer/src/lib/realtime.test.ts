@@ -83,6 +83,7 @@ describe('chartRefreshMs', () => {
     expect(chartRefreshMs('minute', 'lunch-break')).toBe(30_000)
     expect(chartRefreshMs('day', 'closed')).toBe(60_000)
     expect(chartRefreshMs('minute', 'weekend')).toBe(60_000)
+    expect(chartRefreshMs('minute', 'holiday')).toBe(60_000)
   })
 })
 
@@ -93,6 +94,7 @@ describe('tapeRefreshMs', () => {
     expect(tapeRefreshMs('lunch-break')).toBe(30_000)
     expect(tapeRefreshMs('closed')).toBe(60_000)
     expect(tapeRefreshMs('weekend')).toBe(60_000)
+    expect(tapeRefreshMs('holiday')).toBe(60_000)
   })
 })
 

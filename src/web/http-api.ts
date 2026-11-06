@@ -46,6 +46,7 @@ import type {
   MacBoard,
   MacUnusualItem,
   MarketBreadth,
+  MarketCalendarStatus,
   F10ProfileTable,
   FormulaScreenRequest,
   FormulaScreenResult,
@@ -411,7 +412,9 @@ export function createHttpApi(): PythonTdxApi {
   }
 
   const market = {
-    breadth: () => post<MarketBreadth>('/api/market_breadth', {})
+    breadth: () => post<MarketBreadth>('/api/market_breadth', {}),
+    status: (force?: boolean) =>
+      post<MarketCalendarStatus>('/api/market_status', { force: force === true })
   }
 
   const api: PythonTdxApi = {

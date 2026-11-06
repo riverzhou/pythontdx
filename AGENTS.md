@@ -105,8 +105,8 @@
 ```bash
 npm run dev                 # 开发模式（主进程重启 + 渲染层热更新 + Python 桥接）
 npm run check               # 类型 + Lint + TS 测试 + Python 测试，一条命令
-npm run test                # 只跑 TS 测试（366 个用例）
-npm run test:python         # 只跑 Python 协议/HTTP 测试（324 个用例）
+npm run test                # 只跑 TS 测试（369 个用例）
+npm run test:python         # 只跑 Python 协议/HTTP 测试（331 个用例）
 npm run audit:data          # 数据覆盖自检（39 项，会触发自动归档；清单见 docs/12）
 npm run build:python        # Nuitka 打行情桥接单文件（打包前必跑）
 npm run shot                # 构建并截图到 screenshots/，用来肉眼验收界面
@@ -129,7 +129,7 @@ npm run build:mac:all       # 散装 .app + dmg（每次版本更新后的验证
 也可用 `PYTHONTDX_PYTHON` 指定）。打包后的 exe 自带桥接程序，用户不需要 Python。
 打包前先 `python3 -m pip install -r requirements.txt`（含 pyarrow/duckdb/Nuitka/patchelf；Linux）。
 
-**v1.5.0**：只读 HTTP API + Web 前端（`python3 python/tdx_server.py`、`npm run dev:web`）；
+**v1.6.0**：只读 HTTP API + Web 前端（`python3 python/tdx_server.py`、`npm run dev:web`）；
 `--web-dir out/web` 可单端口托管；Web 端自选/设置/预警/公式/持仓写 localStorage，行情仍只读；SSE + WebSocket 已接；独立窗口不可用。
 桌面走 stdio sidecar，Web 走 HTTP/SSE/WS，但行情缓存/K 线增量/涨跌家数只有 Python 一份实现。
 
@@ -181,14 +181,17 @@ docs/            说明文档（是什么、为什么）
 
 ## 五、当前阶段
 
-**v1.5.0 已发布：社区 PR #1 收口 + 前后端边界重整。**
+**v1.6.0：TDX 交易日历 + Electron/Web 二选一部署。**
+部署模式：**Electron 桌面与 Web 二选一，不同时使用**；同机只允许一个 Python 后端持有 7709 连接（`PRINCIPLES.md` A6）。
 行情、分时、五日、K 线增量、涨跌家数缓存全部只有 Python 一份实现；
 桌面（IPC/stdio）与 Web（HTTP/SSE/WS）只是同一批 `Bridge` 方法的两种传输。
 两条新原则已写入 `PRINCIPLES.md`：**A2** 数据逻辑归 Python、前端 TS 只负责展示与传输；
 **A8** Web/Electron 同源（同一命令、同一响应、同一测试）。
 逐项映射与核对表见 `docs/23-前后端边界与双端一致性.md`。
 
-健康度 `npm run check` 全绿（366 个 TS 测试 + 324 个 Python 测试，各 2/1 skipped）。
+健康度 `npm run check` 全绿（369 个 TS 测试 + 331 个 Python 测试，各 2/1 skipped）。
+1.6.0 新增：TDX 官方节假日快照 + 0x120F 交易日状态、`market_status`、
+`holiday` 会话；桌面/Web/离线窗口共用同一份日历。
 1.5.0 修掉：`updateTime` JSON null 导致状态栏显示「—」、Windows 跨源 403 断连、
 0~500ms 时段边界盲区、取消订阅后轮询空转、实时 K 线 tail 每秒落盘。
 架构详情见 `docs/02`；缓存/降频规则见 `docs/23`。
@@ -201,7 +204,7 @@ Web 前端（本地状态写）、Windows x64 / Linux x64 / macOS arm64 三平�
 - 长期目标与范围：先读 `docs/00-项目章程.md`；差距与优先级见 `PLAN.md` 第二、四节
 - 平台：代码跨 Windows/Linux/macOS；在各自系统本机构建，不做交叉编译；自动化主要跑 Linux，Windows / macOS 由对应机器实测
 - 数据源只做 A 股；港股/美股/期货/期权明确不做，7727 扩展行情也不做
-- 技术债见 `PLAN.md` 第五节（含桌面/Web 各自 Python 进程、节假日、展示缓冲合并）
+- 技术债见 `PLAN.md` 第五节（含展示缓冲合并、日历覆盖年份等）
 
 **开工前请先读 `PLAN.md`，收工前请更新它。**
 发布新版本时记得同步更新 `CHANGELOG.md`。

@@ -14,7 +14,8 @@ import { registerIpcHandlers } from './ipc'
 import { QuotePoller } from './services/poller'
 import { PushHub } from './services/push'
 import { fetchPushTask } from './services/push-fetch'
-import { closeTdx, warmTdxBridge } from './services/tdx'
+import { closeTdx, fetchMarketStatus, warmTdxBridge } from './services/tdx'
+import { setMarketCalendarStatus } from '@shared/market'
 import { AppStore } from './services/store'
 import { migrateLegacyPortableData, migrateLegacyUserData } from './services/legacy'
 import {
@@ -379,6 +380,19 @@ function onReady(): void {
 
   // 先拉起 Python，窗口加载与 sidecar 启动并行；首屏缓存请求不用再等进程冷启动。
   warmTdxBridge()
+
+  // 主进程也持有一份 TDX 交易日历：QuotePoller 的降频要用它，且渲染层
+  // 的 IPC 实例与主进程不是同一个模块实例。
+  const refreshCalendar = (): void => {
+    void fetchMarketStatus()
+      .then((status) => setMarketCalendarStatus(status))
+      .catch(() => undefined)
+  }
+  // 首帧行情优先：日历状态晚 1 秒再拉，避免和 sidecar 首批行情抢队列。
+  const firstCalendar = setTimeout(refreshCalendar, 1000)
+  firstCalendar.unref()
+  const calendarTimer = setInterval(refreshCalendar, 5 * 60_000)
+  calendarTimer.unref()
 
   mainWindow = createMainWindow({
     bounds: currentStore.bounds,

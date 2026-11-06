@@ -61,6 +61,7 @@ import type {
   MacMoneyFlowPoint,
   MacUnusualItem,
   MarketBreadth,
+  MarketCalendarStatus,
   MinuteTrend,
   MoneyFlowRecord,
   MultiDayTrend,
@@ -170,6 +171,8 @@ export const IPC = {
   f10ChangePlans: 'f10:change-plans',
   /** 全 A 股涨跌家数（invoke） */
   marketBreadth: 'market:breadth',
+  /** 通达信交易日历状态（invoke） */
+  marketStatus: 'market:status',
   /** 读取本地 .day 日线（invoke） */
   localDayRead: 'local:day',
   /** 本地行情导入数据湖（invoke） */
@@ -395,6 +398,8 @@ export interface PythonTdxApi {
   }
   market: {
     breadth(): Promise<MarketBreadth>
+    /** 通达信交易日历：今天是否交易日/最近交易日/覆盖范围 */
+    status(force?: boolean): Promise<MarketCalendarStatus>
   }
   f10: {
     /** 公司资料目录（0x02cf） */

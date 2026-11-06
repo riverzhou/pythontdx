@@ -59,7 +59,8 @@ const api: PythonTdxApi = {
     archiveBatch: (codes, date) => ipcRenderer.invoke(IPC.auctionArchiveBatch, codes, date)
   },
   market: {
-    breadth: () => ipcRenderer.invoke(IPC.marketBreadth)
+    breadth: () => ipcRenderer.invoke(IPC.marketBreadth),
+    status: (force?: boolean) => ipcRenderer.invoke(IPC.marketStatus, force === true)
   },
   f10: {
     catalog: (code) => ipcRenderer.invoke(IPC.f10Catalog, code),

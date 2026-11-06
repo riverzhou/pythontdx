@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { MarketCalendarStatus } from './types'
 import {
   inferMarket,
   isIndexCode,
@@ -8,9 +9,31 @@ import {
   msUntilSessionChange,
   normalizeCode,
   pollDelayMs,
+  setMarketCalendarStatus,
   shanghaiClock,
   splitCode
 } from './market'
+
+function calendar(overrides: Partial<MarketCalendarStatus> = {}): MarketCalendarStatus {
+  return {
+    schema: 'pythontdx.trading_calendar.v1',
+    today: '2026-11-06',
+    lastTradingDay: '2026-11-06',
+    isTradingDay: true,
+    holidays: [],
+    holidaySource: 'test',
+    source: 'test',
+    fetchedAt: 0,
+    stale: false,
+    error: '',
+    time: '10:00:00',
+    date: '2026-11-06',
+    session: 'trading',
+    ...overrides
+  }
+}
+
+afterEach(() => setMarketCalendarStatus(null))
 
 describe('splitCode', () => {
   it('拆出市场与代码', () => {
@@ -197,6 +220,47 @@ describe('pollDelayMs（桌面与 Web 共用降频规则）', () => {
 
   it('周末按休市降频', () => {
     expect(pollDelayMs(1000, new Date('2026-11-07T02:00:00Z'))).toBe(IDLE_POLL_MIN_MS)
+  })
+})
+
+describe('TDX 交易日历状态', () => {
+  it('状态判今天休市时返回 holiday，并让轮询降频', () => {
+    setMarketCalendarStatus(
+      calendar({
+        today: '2026-02-17',
+        lastTradingDay: '2026-02-13',
+        isTradingDay: false,
+        holidays: ['2026-02-16', '2026-02-17', '2026-02-23']
+      })
+    )
+    const holiday = new Date('2026-02-17T02:00:00Z')
+    expect(marketSession(holiday)).toBe('holiday')
+    expect(shanghaiClock(holiday).sessionLabel).toBe('节假日休市')
+    expect(pollDelayMs(1000, holiday)).toBe(IDLE_POLL_MIN_MS)
+  })
+
+  it('节假日后第一个交易日恢复正常', () => {
+    setMarketCalendarStatus(
+      calendar({
+        today: '2026-02-17',
+        isTradingDay: false,
+        holidays: ['2026-02-16', '2026-02-17', '2026-02-23']
+      })
+    )
+    expect(marketSession(new Date('2026-02-24T02:00:00Z'))).toBe('trading')
+  })
+
+  it('未来节假日列表也参与边界计算', () => {
+    setMarketCalendarStatus(
+      calendar({
+        today: '2026-09-24',
+        isTradingDay: true,
+        holidays: ['2026-09-25']
+      })
+    )
+    // 2026-09-24 16:00 → 2026-09-28 09:15（9/25 周五 + 周末）
+    const start = new Date('2026-09-24T08:00:00Z')
+    expect(msUntilSessionChange(start)).toBe((3 * 24 + 17.25) * 60 * 60_000)
   })
 })
 

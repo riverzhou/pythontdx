@@ -15,13 +15,13 @@
 
 | 项目          | 值                                                                                                                                                                                                                                                                                                                                  |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 版本          | `1.5.0`（正式发布；功能矩阵 334 ✅ / 0 🟡 / 0 ⬜ / 6 ⛔，数据边界另见 docs/12）                                                                                                                                                                                                                                                        |
-| 最近提交      | 2026-11-06：**合并社区 PR #1**（收盘降频、涨跌家数缓存、F10 解耦行情锁），审核后修复 `updateTime` null、Windows 403 断连、时段边界盲区、取消订阅空转、实时 K 线每秒落盘；**架构重整**：行情/分时/K 线增量/涨跌家数缓存全部下沉 Python，TS 只做展示与传输；新增 `PRINCIPLES.md` A2/A8 与 `docs/23`；**1.4.0 基线**：离线数据 24 数据集并行同步、日 K 官方 `.day`、1m 100 日、Parquet staging、任务续跑 |
-| 健康度        | `npm run check` 全绿（366 TS，364 通过/2 skipped；**324 Python**，323 通过/1 skipped）；新增缓存/增量/边界/取消订阅回归；`audit:data` 39/39 |
+| 版本          | `1.6.0`（准备发布；功能矩阵 334 ✅ / 0 🟡 / 0 ⬜ / 6 ⛔，数据边界另见 docs/12）                                                                                                                                                                                                                                                        |
+| 最近提交      | 2026-11-06：**TDX 交易日历**：内置 TDX 官方 `Except2025/2026.zip` 快照 + MAC 0x120F 当前交易日，新增 `market_status`/`/api/market_status`；Electron 与 Web 明确二选一部署；**1.5.0**：合并社区 PR #1（收盘降频、涨跌家数缓存、F10 解耦行情锁），审核后修复 `updateTime` null、Windows 403 断连、时段边界盲区、取消订阅空转、实时 K 线每秒落盘；**架构重整**：行情/分时/K 线增量/涨跌家数缓存全部下沉 Python，TS 只做展示与传输；新增 `PRINCIPLES.md` A2/A8 与 `docs/23`；**1.4.0 基线**：离线数据 24 数据集并行同步、日 K 官方 `.day`、1m 100 日、Parquet staging、任务续跑 |
+| 健康度        | `npm run check` 全绿（369 TS，367 通过/2 skipped；**331 Python**，330 通过/1 skipped）；新增 TDX 日历/0x120F/节假日/部署边界回归；`audit:data` 39/39 |
 | 数据能力      | 7709 29 命令、MAC 15 条 A 股相关、7615 51 个入口；新增 `lake/top_board`、`lake/unusual`、`lake/volume_profile`；按代码/按业务 key 分片归档 11 类，修复「同一天只存第一只」 |
 | 目标          | 桌面 + Web 双前端；A 股协议全覆盖；实时 + 离线 + 面向 ML 的数据湖（`docs/00`）                                                                                                                                                                                                                                                      |
 | 数据源        | 通达信 7709 + MAC + 7615 + 文件下载/本地文件；7727/EX 不做                                                                                                                                                                                                                                                                          |
-| 分发          | `v1.5.0`：Windows 本机构建 setup/portable/zip；tag 触发 GitHub Actions 构建 Linux/Windows/macOS 三平台 Release；GitLab/GitHub 同步推送 |
+| 分发          | `v1.6.0`：Windows 本机构建 setup/portable/zip；tag 触发 GitHub Actions 构建 Linux/Windows/macOS 三平台 Release；GitLab/GitHub 同步推送 |
 | 平台验证      | 代码跨 Windows/Linux/macOS；Linux、Windows x64、macOS arm64 已实机打包验收；macOS 仅支持 Apple Silicon（2026-11-02 决定不支持 Intel）                                                                                                                                                                                               |
 | 构建/测试环境 | Windows 10 22H2 x64 · macOS 27.2 arm64 · Ubuntu 26.04.1 x64；原生编译，不做交叉编译；0.14.4 Windows 安装版 K 线 353ms / 逐笔 209ms（自签名），macOS 真首次 10,333ms、二次 365ms                                                                                                                                                     |
 
@@ -57,6 +57,19 @@ updateTime 作游标，无变化返回 0 条；客户端已缓存上一帧、按
 ---
 
 ## 二、进行中与下一阶段
+
+### P0 · 2026-11-06：TDX 交易日历与部署模式（1.6.0）
+
+用户要求：① Electron 与 Web 设计上不同时使用；② 引入交易日历（用通达信自己的数据）。
+
+1. **交易日历**：内置 TDX `Except2025/2026.zip` 的 `neednote_RecentHSHoliday.txt`
+   快照；MAC 0x120F `today`/`lastTradingDay` 识别临时休市；新增
+   `market_status` + `/api/market_status`；Python/TS 会话增加 `holiday`；
+   离线窗口/Poller/SSE/图表/逐笔共用。
+2. **部署模式**：PRINCIPLES A6、docs/02、docs/23、README、AGENTS 明确二选一；
+   同机只允许一个 Python 后端持有 7709。
+3. **验证**：369 TS + 331 Python 全绿；Windows 构建与实机启动；tag v1.6.0
+   由 GitHub Actions 三平台发布。
 
 ### P0 · 2026-11-06：PR #1 收口与前后端边界重整（已完成）
 
@@ -460,8 +473,6 @@ liveTicks 每秒增长、九宫格/ K 线 1 秒徽标；AppImage 双击修复需
 | TD14 | **Nuitka 打包需 patchelf**（Linux onefile 依赖）                                          | 缺少 patchelf 时构建失败                                 | `python3 -m pip install --user patchelf` 后重试                                                                    |
 | TD15 | **行情时间字段语义未确认**（`serverTimeRaw`）                                             | 界面暂用接收时间，非交易时段显示的不是最后成交时间       | 若要与行情软件对齐，需要继续逆向或改用日K日期 + 收盘时间                                                           |
 | TD16 | **本机 DSH 的 `read_image` 在 Linux 崩溃**（native sharp 与 Electron GLib 冲突，SIGSEGV） | 截图能生成，但我无法直接读图；视觉验收改用 DOM 文本/尺寸 | 已用用户级 WASM hook（`Module._load` + `process.dlopen` 双层）在真实 Host 验证 2560×1640 解码成功，重启 DSH 后生效 |
-| TD17 | **桌面与 Web 各自启动一个 Python 进程**：同机同时运行会有两条 7709 连接与两份内存缓存      | 双开时资源翻倍；缓存不一致风险                           | 长期改为单后端 + 桌面连 HTTP；当前先在文档中明确                                                                   |
-| TD18 | **节假日不精确**：工作日节假日仍按交易时段轮询                                            | 假日空转；开盘/收盘判断可能多拉几帧                       | 引入交易日历（`trading_holidays.json` 已有雏形）                                                                   |
 | TD19 | **渲染层保留 K 线展示缓冲并合并 tail**                                                    | 权威缓存在 Python，但展示缓冲的合并规则需要持续对齐      | 与 Python `merge_kline_bars` 共用测试向量；禁止扩散为业务缓存                                                       |
 | TD21 | **桌面/Web 调度实现各一处**（Poller/PushHub/浏览器定时器/Python Hub）                     | 都是薄壳，但新增调度容易再写一套                         | 新增调度只复用 `pollDelayMs`/`_quote_interval` 测试向量                                                             |
 | TD22 | **外部资料与参考项目许可证未逐项核对**                                                    | 引入代码/文档时有合规风险                                | 引入前读 LICENSE 并登记到 `docs/08`                                                                                |
