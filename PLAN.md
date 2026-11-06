@@ -74,7 +74,7 @@ updateTime 作游标，无变化返回 0 条；客户端已缓存上一帧、按
    `_quote_interval()` 用同一组测试向量；`docs/23` 记录映射表与核对清单。
 4. **文档**：README、docs/02、docs/22、PRINCIPLES、PLAN、CHANGELOG、docs/07。
 5. **验证**：366 TS + 324 Python 全绿；Windows 本机构建与启动验收；tag `v1.5.0`
-   触发 GitHub Actions 三平台 Release。
+   触发 GitHub Actions run `42162458126`，三平台 success，12 个资产发布。
 
 ### P0 · 2026-11-04 第二轮：数据功能收口（代码＋文档完成）
 

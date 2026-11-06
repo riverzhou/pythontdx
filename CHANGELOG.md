@@ -84,7 +84,8 @@ pythontdx 的所有重要变更都记录在这里。
   （323 通过 / 1 skipped）。
 - 新增覆盖：Python 缓存/TTL/K 线增量/涨跌家数/时段边界/403 请求体；
   TS `pollDelayMs`/临近边界/`QuotePoller` 取消。
-- Windows 本机构建与实机启动见 `docs/07` 第四十七节。
+- Windows 本机构建与实机启动见 `docs/07` 第四十七节；tag `v1.5.0` 的 GitHub
+  Actions run `42162458126` 三平台 success，12 个资产发布。
 
 ---
 

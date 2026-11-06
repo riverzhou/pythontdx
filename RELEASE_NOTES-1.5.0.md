@@ -50,7 +50,8 @@
   时段边界、403 请求体排空。
 - 新增 TS 测试：`pollDelayMs`、临近边界、`QuotePoller` 取消后不空转。
 - Windows 本机构建与启动验收见 `docs/07` 第四十七节；三平台二进制由
-  tag `v1.5.0` 的 GitHub Actions `release.yml` 构建并发布。
+  tag `v1.5.0` 的 GitHub Actions run `42162458126` 构建，12 个资产已发布到
+  <https://github.com/riverzhou/pythontdx/releases/tag/v1.5.0>。
 
 ## 升级提示
 
