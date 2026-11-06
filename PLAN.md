@@ -69,7 +69,7 @@ updateTime 作游标，无变化返回 0 条；客户端已缓存上一帧、按
 2. **部署模式**：PRINCIPLES A6、docs/02、docs/23、README、AGENTS 明确二选一；
    同机只允许一个 Python 后端持有 7709。
 3. **验证**：369 TS + 331 Python 全绿；Windows 构建与实机启动；tag v1.6.0
-   由 GitHub Actions 三平台发布。
+   由 GitHub Actions run `42166373012` 三平台 success，12 个资产发布。
 
 ### P0 · 2026-11-06：PR #1 收口与前后端边界重整（已完成）
 

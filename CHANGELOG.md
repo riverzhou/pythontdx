@@ -41,7 +41,7 @@ pythontdx 的所有重要变更都记录在这里。
 - 新增：官方节假日解析、0x120F 状态、`holiday` 会话、春节/国庆边界、
   离线窗口、Web/桌面 `market_status` 契约测试。
 - Windows 本机构建与启动验收见 `docs/07` 第四十八节；tag `v1.6.0` 的
-  GitHub Actions 三平台发布。
+  GitHub Actions run `42166373012` 三平台 success，12 个资产已发布。
 
 ---
 
