@@ -21,14 +21,18 @@ import mimetypes
 import sys
 import threading
 import time
-from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tdx_bridge import SHANGHAI_TZ, Bridge, TdxError, shanghai_clock
+from tdx_bridge import (
+    Bridge,
+    TdxError,
+    ms_until_session_change,
+    shanghai_clock,
+)
 from subscription_hub import SubscriptionHub
 
 MAX_BODY_BYTES = 1024 * 1024
@@ -50,27 +54,6 @@ def _quote_interval(interval: float) -> float:
     return max(interval * IDLE_QUOTE_INTERVAL_SCALE, IDLE_QUOTE_MIN_SECONDS)
 
 
-# 涨跌家数整轮扫描要 70 次 0x054b 往返：交易时段对齐前端 30 秒轮询，
-# 午休与收盘后数据不变，直接复用缓存。
-BREADTH_TRADING_TTL = 15.0
-BREADTH_LUNCH_TTL = 120.0
-BREADTH_CLOSED_TTL = 300.0
-
-
-def _breadth_ttl() -> float:
-    """涨跌家数缓存时长，按时段区分。"""
-    _now, session = shanghai_clock()
-    if session in {"trading", "pre-open"}:
-        return BREADTH_TRADING_TTL
-    if session == "lunch-break":
-        return BREADTH_LUNCH_TTL
-    return BREADTH_CLOSED_TTL
-
-
-def _shanghai_day() -> str:
-    """缓存跨日失效：收盘缓存不能带到下一个交易日。"""
-    return datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d")
-
 
 class TdxApiServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -85,16 +68,18 @@ class TdxApiServer(ThreadingHTTPServer):
         super().__init__(address, ApiHandler)
         self.bridge = bridge
         self.lock = threading.Lock()
-        # 涨跌家数缓存：single-flight 让多个标签页共享同一轮扫描。
-        # 锁顺序固定为 breadth_lock -> lock，避免与分页扫描互锁。
+        # 涨跌家数 single-flight：多个标签页共享同一轮扫描。缓存与 TTL 在
+        # Bridge 内（桌面 IPC 与 Web 共用同一份规则）；这里只防止并发开新扫描。
+        # 锁顺序固定为 breadth_lock -> lock。
         self.breadth_lock = threading.Lock()
-        self.breadth_cache: dict | None = None
-        self.breadth_at = 0.0
-        self.breadth_day = ""
         self.web_dir = Path(web_dir).resolve() if web_dir else None
         # SSE/WebSocket 共享一个订阅 Hub：同一组代码只轮询一次，结果扇出。
         # 收盘/午休由 _quote_interval 统一降频，客户端无需感知。
-        self.hub = SubscriptionHub(self._fetch_quotes, interval_for=_quote_interval)
+        self.hub = SubscriptionHub(
+            self._fetch_quotes,
+            interval_for=_quote_interval,
+            boundary_for=ms_until_session_change,
+        )
 
     def _fetch_quotes(self, codes: list[str]) -> list[dict]:
         # 与 Electron IPC、/api/quotes 共用同一套实时行情编排
@@ -102,54 +87,21 @@ class TdxApiServer(ThreadingHTTPServer):
             return self.bridge.live_quotes(codes)
 
     def market_breadth(self) -> dict:
-        """带缓存的全市场涨跌家数。
+        """全市场涨跌家数：Bridge 负责缓存/跨日失效，服务端只负责分步扫描。
 
-        扫描本身要 70 次往返；缓存命中时直接返回，交易时段 TTL 15 秒与前端
-        30 秒轮询对齐，午休 120 秒、收盘 300 秒，跨日强制失效。
+        每步只持有行情锁 8 页（640 只），图表/逐笔请求可以在步与步之间插队。
         """
         with self.breadth_lock:
-            now = time.monotonic()
-            day = _shanghai_day()
-            cached = self.breadth_cache
-            if cached is not None and self.breadth_day == day:
-                if now - self.breadth_at < _breadth_ttl():
-                    return cached
-            value = self._scan_breadth()
-            self.breadth_cache = value
-            self.breadth_at = time.monotonic()
-            self.breadth_day = day
-            return value
-
-    def _scan_breadth(self) -> dict:
-        """分页扫描全 A 股涨跌家数。
-
-        每页重新加锁，图表/逐笔请求可以在页与页之间插队。
-        """
-        start = 0
-        up = down = flat = limit_up = limit_down = 0
-        updated_at = 0
-        for _ in range(200):
-            with self.lock:
-                page = self.bridge.market_breadth_page(start, 8)
-            up += int(page.get("up") or 0)
-            down += int(page.get("down") or 0)
-            flat += int(page.get("flat") or 0)
-            limit_up += int(page.get("limitUp") or 0)
-            limit_down += int(page.get("limitDown") or 0)
-            updated_at = int(page.get("updatedAt") or updated_at)
-            next_start = page.get("nextStart")
-            if next_start is None:
-                return {
-                    "up": up,
-                    "down": down,
-                    "flat": flat,
-                    "limitUp": limit_up,
-                    "limitDown": limit_down,
-                    "total": up + down + flat,
-                    "updatedAt": updated_at,
-                }
-            start = int(next_start)
-        raise TdxError("涨跌家数分页异常")
+            begun = self.bridge.breadth_begin()
+            if begun.get("done"):
+                return begun["result"]
+            scan_id = int(begun.get("scanId") or 0)
+            for _ in range(200):
+                with self.lock:
+                    step = self.bridge.breadth_step(scan_id, 8)
+                if step.get("done"):
+                    return step["result"]
+            raise TdxError("涨跌家数分页异常")
 
     def server_close(self) -> None:
         try:
@@ -195,6 +147,23 @@ class ApiHandler(BaseHTTPRequestHandler):
             return True
         host = (urlparse(origin).hostname or "").lower()
         return host in {"127.0.0.1", "localhost", "::1"}
+
+    def _drain_body(self) -> None:
+        """拒绝写请求前读掉已声明的请求体。
+
+        Windows 在关闭仍有未读数据的连接时会发 RST，客户端还没读到 403 就直接
+        抛 ConnectionAbortedError。只读合法且不超过上限的长度，避免被伪造的
+        巨大 Content-Length 拖住。
+        """
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return
+        if 0 < length <= MAX_BODY_BYTES:
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
 
     def _cors(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -492,13 +461,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/kline":
                 with self.server.lock:
                     self._ok(
-                        self.server.bridge.kline(
+                        self.server.bridge.kline_cached(
                             query.get("code", ""),
                             query.get("period", "day"),
                             int(query.get("count", "200")),
                             query.get("adjust", "qfq"),
                             query.get("cacheOnly") in {"1", "true", "yes"},
                             query.get("anchorDate") or None,
+                            query.get("fresh") in {"1", "true", "yes"},
                             int(query.get("start", "0")),
                         )
                     )
@@ -626,7 +596,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/minute":
                 with self.server.lock:
-                    self._ok(self.server.bridge.minute(query.get("code", "")))
+                    self._ok(
+                        self.server.bridge.minute_cached(
+                            query.get("code", ""),
+                            query.get("fresh") in {"1", "true", "yes"},
+                        )
+                    )
                 return
             if parsed.path == "/api/minute_archives":
                 with self.server.lock:
@@ -705,7 +680,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/five_day":
                 with self.server.lock:
-                    self._ok(self.server.bridge.five_day(query.get("code", "")))
+                    self._ok(
+                        self.server.bridge.five_day_cached(
+                            query.get("code", ""),
+                            query.get("fresh") in {"1", "true", "yes"},
+                        )
+                    )
                 return
             if not parsed.path.startswith("/api/"):
                 self._static(parsed.path)
@@ -726,6 +706,9 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if self._is_write_path(parsed.path) and not self._origin_allowed():
+            # 先排空请求体再回 403，否则 Windows 会以 RST 结束连接。
+            self._drain_body()
+            self.close_connection = True
             self._error(HTTPStatus.FORBIDDEN, "写接口只允许本机页面调用")
             return
         try:
@@ -751,6 +734,18 @@ class ApiHandler(BaseHTTPRequestHandler):
                     raise TdxError("codes 必须是数组")
                 with self.server.lock:
                     self._ok(self.server.bridge.live_quotes(codes))
+                return
+            if parsed.path == "/api/kline_live":
+                with self.server.lock:
+                    self._ok(
+                        self.server.bridge.kline_live(
+                            str(payload.get("code") or ""),
+                            str(payload.get("period") or "day"),
+                            int(payload.get("count", 800)),
+                            str(payload.get("adjust") or "qfq"),
+                            bool(payload.get("first")),
+                        )
+                    )
                 return
             if parsed.path == "/api/category":
                 with self.server.lock:

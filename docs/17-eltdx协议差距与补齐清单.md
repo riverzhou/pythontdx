@@ -200,7 +200,7 @@ pythontdx 只有 `TQLEX_URL = http://static.tdx.com.cn:7615/TQLEX`（`tdx_f10.py
 | 股本变迁批量 | 200（`limits.rs:23`） | 75（`CAPITAL_BATCH`） | 我们更保守（非缺陷，吞吐低 2.7×） |
 | 文件块 | 30000/60000（`limits.rs:18-20`） | 30000/60000 | 一致 |
 | 0x053e/0x054c 代码数 | 最多 65535（`quotes.rs:1066-1071`） | 80（`QUOTE_BATCH`） | **自限 80**；5000 只需 63 次往返（P2 性能） |
-| 0x054b 每页条数 | 不限制（u16） | 80（`category_data` 校验） | 自限；配合 `market_breadth_page` 每页 80 |
+| 0x054b 每页条数 | 不限制（u16） | 80（`category_data` 校验） | 自限；配合 `breadth_begin/step` 每步 8 页 |
 | 财务批量 | 65535（`MAX_COMMAND_ITEMS`） | 80（`FINANCE_BATCH`） | 自限；可评估放宽 |
 | 竞价 limit | 500（`auctions.rs:19`） | 500（`AUCTION_LIMIT`） | 一致 |
 

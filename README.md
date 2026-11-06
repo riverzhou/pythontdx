@@ -5,12 +5,12 @@
 
 `Electron` · `Vite` · `SolidJS` · `TypeScript` · `Python` · `7709 / MAC / 7615`
 
-**v1.4.0** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64
+**v1.5.0** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64
 
-`npm run check` **359 TS（357 通过 / 2 skipped）+ 283 Python（282 通过 / 1 skipped）**
+`npm run check` **366 TS（364 通过 / 2 skipped）+ 324 Python（323 通过 / 1 skipped）**
 
 [GitHub Releases](https://github.com/riverzhou/pythontdx/releases) ·
-[数据并行同步](docs/18-离线数据并行同步.md) ·
+[前后端边界](docs/23-前后端边界与双端一致性.md) ·
 [协议总表](docs/21-通达信协议总表.md) ·
 [MAC 策略](docs/19-MAC协议与数据源策略.md)
 
@@ -18,29 +18,65 @@
 
 ## 一眼看懂
 
-![pythontdx 主界面](docs/assets/pythontdx-1.4-overview.png)
+![pythontdx 主界面](docs/assets/pythontdx-1.5-overview.png)
 
 - **实时行情**：1 秒刷新；分时、五日、K 线、九宫格同一节奏；
 - **数据工具**：24 个离线数据集，日 K 与 1 分钟 K 独立勾选，多进程 × 多线程 × 多服务器并行；
 - **协议覆盖**：7709 主站 29 条命令、MAC 15 条 A 股相关命令、7615 51 个入口；
 - **本地数据湖**：Parquet/ZSTD + DuckDB、JSONL.gz、`trade_date=` 分区、manifest + SHA256；
-- **桌面 + Web**：同一套渲染层，桌面走 IPC，Web 走 HTTP/SSE/WebSocket。
+- **桌面 + Web**：同一套渲染层；桌面走 IPC，Web 走 HTTP/SSE/WebSocket；
+  行情缓存、K 线增量、涨跌家数统计只有 Python 一份实现。
 
-## 1.4.0 重点：离线 K 线下载重做
+### Web 端：同一套界面、同一份数据
 
-- **日 K 走官方文件**：`0x06b9` 直接下载 `vipdoc/{sh,sz,bj}/lday/<code>.day`，
-  失败才回退 0x052d 分页；600519 实测 6,035 根全历史 / 7 个块，100 只 16×4 约 6.2 秒。
-- **1 分钟 K 100 日窗口**：独立 `kline_1m` 数据集，优先复用本地缓存，只补最新页；
-  服务端实际保留约 92 个交易日（600519 实测 22,080 根）。
-- **Parquet 写入提速**：临时 CSV staging + DuckDB `COPY`，2.2 万行约 4 秒降到
-  **0.19 秒/文件**；最终仍是 Parquet+ZSTD+manifest，CSV 写完即删。
-- **真正跳过已有数据**：1m/manifest/auction/money_flow/日 K 都有明确的跳过规则；
-  “服务器明确无数据”写 `.nodata.json`，第二次同步不再重试；北交所旧 `.day`
-  当天只刷新一次，避免同一天反复重下。
-- **任务摘要/续跑**：保留 `completed/failed/incomplete/cancelled`、完成/失败/行数/
-  总耗时；中断可一键续跑，自动续跑默认开启，同一 jobId 只自动尝试一次。
-- **官方 1 分钟没有 HTTP URL**：7719 文件服务对 `.lc1` 返回 `size=0`；官方客户端
-  是行情协议抓取后写 `vipdoc/*/minline/*.lc1`，本项目继续走 0x052d。
+![pythontdx Web 端](docs/assets/pythontdx-1.5-web.png)
+
+浏览器打开 `python/tdx_server.py --web-dir out/web` 的同一端口即可使用；
+2026-11-06 验收时桌面与 Web 同时显示 `sh000001` 3647.90、涨 911/跌 4548，
+K 线/分时/逐笔/盘口一致，右下角版本分别为 `v1.5.0` 与 `v1.5.0-web`。
+
+## 1.5.0 重点：PR 收口 + 数据逻辑归 Python
+
+### 社区 PR #1 合并
+
+社区提交的 `perf/closing-downshift-and-locks` 已合并，主要包含：
+
+- 收盘/午休自动降频：桌面 `QuotePoller` 与 Web SSE/WS 都按交易时段降速；
+- 涨跌家数改分页扫描，页间释放行情锁；Web 端加缓存与跨日失效；
+- F10 路由移出行情锁，7615 网关按延迟选择并冷却失败站点；
+- 行情编排（快照 → 增量 → 合并 → 竞价 → MAC 兜底）下沉 Python Bridge；
+- 逐笔面板收盘后降频；K 线推送防重入。
+
+### 审核后修掉的问题
+
+- **`updateTime` 变成 JSON `null`**：Python 合并把字段置 `None`，状态栏用
+  `!== undefined` 判断，盘中会把行情时间显示成「—」。现在 Python 删除该字段，
+  状态栏同时兼容 `null`。
+- **Windows 跨源写请求断连**：服务端拒绝写请求时没读完请求体，Windows 发 RST，
+  客户端拿不到 403；现在先排空再响应。
+- **时段边界盲区**：轮询在 12:59:59.6 醒来时会跳过 0~500ms 的边界，开盘第一帧
+  被拖后 30 秒；TS/Python 两侧都改为不跳过临近边界，并补了测试。
+- **取消订阅后空转**：`QuotePoller` 在途请求的 `finally` 会把定时器复活；
+  现在用 `active` 标记阻止，并过滤主动取消产生的错误帧。
+- **实时 K 线每秒落盘**：tail 请求原来每秒重写 20 根 parquet；现在 tail 不落盘，
+  只有首帧/60 秒全量落盘。
+
+### 架构重整：TS 只展示，Python 管数据
+
+两条新原则写入 [`PRINCIPLES.md`](PRINCIPLES.md)：**A2**（数据逻辑归 Python，
+前端 TS 只负责展示与传输）与 **A8**（Web/Electron 同源：同一命令、同一响应、
+同一测试）。落地结果：
+
+| 能力 | 1.4.0 | 1.5.0 |
+| --- | --- | --- |
+| 实时行情合并/竞价/MAC 兜底 | 桌面 TS + Web 各一套 | Python `live_quotes` 一份 |
+| 分时 10s / 五日 60s / K 线 60s TTL | 桌面主进程缓存，Web 无缓存 | Python `*_cached`，两端同 TTL |
+| 实时 K 线 tail/断层/60s 全量 | `shared/kline-live.ts` + Web 标签页缓存 | Python `kline_live`，缓存只在 Bridge |
+| 涨跌家数扫描/计数/TTL/跨日 | 桌面 TS 缓存 + Web 服务端缓存 | Python `breadth_begin/step` 一份 |
+| 行情时段降频 | 桌面 TS / Web Python 各一套 | 同一组测试向量；壳只做传输调度 |
+
+详细映射、缓存规则、反模式与发布前核对表见
+[`docs/23-前后端边界与双端一致性.md`](docs/23-前后端边界与双端一致性.md)。
 
 ---
 
@@ -48,7 +84,7 @@
 
 ### 主图：指数 K 线、成交量、盘口
 
-![指数 K 线与成交量](docs/assets/pythontdx-1.4-overview.png)
+![指数 K 线与成交量](docs/assets/pythontdx-1.5-overview.png)
 
 主图上方是今开/最高/最低/昨收、换手、量比、振幅、均价、涨停/跌停、成交量/成交额；
 右侧五档盘口 + 明细/指标/分价/资金/竞价页签；下方成交量与 MACD 副图。
@@ -124,7 +160,7 @@
 - worker 每 1.5 秒原子写进度，父进程只读文件，不阻塞状态查询；
 - Windows 看门狗用 `OpenProcess + WaitForSingleObject`，不会误发 Ctrl+C。
 
-### 跳过规则（1.4.0 修正）
+### 跳过规则
 
 | 数据 | 规则 |
 | --- | --- |
@@ -145,6 +181,20 @@
 ```
 
 这台 8 核/16 线程机器上，48 进程不总是更快；默认 8×4 更稳。
+
+### 实时缓存（1.5.0）
+
+| 数据 | 位置 | TTL/窗口 |
+| --- | --- | --- |
+| 实时报价 | Python `live_quotes` + 游标 | 每次调用；快照覆盖价格、增量保留五档 |
+| 分时 | Python `_minute_cache` | 10 秒；推送传 `fresh=true` 绕过 |
+| 五日 | Python `_five_day_cache` | 60 秒；推送传 `fresh=true` 绕过 |
+| K 线 | Python `_kline_cache` | 60 秒；`cacheOnly` 先读本地 parquet |
+| 实时 K 线 | Python `_kline_live_cache` | tail 20 根；60 秒补全量；断层重取 |
+| 涨跌家数 | Python `_breadth_cache` | 交易 15s / 午休 120s / 收盘 300s；跨日失效 |
+
+非交易时段轮询放大 10 倍、最少 30 秒；等待被下一次交易时段边界封顶。
+桌面与 Web 使用同一组规则（`pollDelayMs` / `_quote_interval`）+ 同一组测试向量。
 
 ---
 
@@ -216,7 +266,7 @@
 每份归档带 manifest（来源、时间、行数、SHA256、文件列表）；
 `data_coverage` 扫描覆盖，`data_integrity` 逐份校验 manifest/SHA256。
 **正常显示问题不需要重新下载历史数据**——缓存有校验，只有损坏副本才允许重写。
-1.4.0 对“有 parquet 无 manifest”的旧 1m 文件会读回补 manifest，不整只重抓。
+本地数据默认永久保留，不提供清理/删除入口。
 
 ---
 
@@ -256,16 +306,18 @@ npm run build:mac    # macOS arm64 dmg
 ```
 
 发布产物在 `release/<version>/`；打 tag 后 GitHub Actions 构建三平台并上传 Release。
+完整步骤见 [docs/07-手动编译发布手册](docs/07-手动编译发布手册.md)。
 
 ---
 
 ## 项目结构
 
 ```text
-src/main/        桌面壳：窗口/托盘/更新/拉起 Python sidecar
+src/main/        桌面壳：窗口/托盘/更新/拉起 Python sidecar/传输调度
 src/preload/     contextBridge 白名单
 src/shared/      桌面/Web/后端共享类型与纯函数
 src/renderer/    SolidJS 界面（桌面与 Web 共用）
+src/web/         Web 外壳与 HTTP/SSE/WS 适配
 python/          通达信协议 + Python 服务/数据任务
 scripts/         图标、截图、Python 入口、协议探针
 docs/            是什么、为什么、协议与发布记录
@@ -274,11 +326,16 @@ docs/            是什么、为什么、协议与发布记录
 新代码位置：
 
 - 新协议/字段解析 → `python/tdx_bridge.py` + `python/test_tdx.py` + fixture；
+- 行情缓存/合并/TTL/统计 → `python/tdx_bridge.py`（不要再写 TS 版）；
 - 主机探活/落盘/补历史 → `python/`；
 - 桌面/Web 共用界面 → `src/renderer/`；
 - 平台外壳 → `src/main/`；
 - 全局状态 → `src/renderer/src/stores/`；
 - 颜色/间距/动效 → `src/renderer/src/styles/tokens.css`。
+
+**边界原则**：TS 只负责展示与传输；数据逻辑、缓存、合并、统计只在 Python。
+详见 [`PRINCIPLES.md`](PRINCIPLES.md) A2/A8 与
+[`docs/23`](docs/23-前后端边界与双端一致性.md)。
 
 ---
 
@@ -287,15 +344,18 @@ docs/            是什么、为什么、协议与发布记录
 | 文档 | 内容 |
 | --- | --- |
 | [docs/00-项目章程](docs/00-项目章程.md) | 目标、范围、六条核心要求 |
-| [docs/02-架构](docs/02-架构.md) | 双前端、Python sidecar、数据流 |
-| [docs/03-通达信协议](docs/03-通达信协议.md) | 7709/MAC/7615 字段与报文 |
+| [docs/02-架构](docs/02-架构设计.md) | 双前端、Python 数据层、数据流 |
+| [docs/03-通达信协议](docs/03-通达信行情手册.md) | 7709/MAC/7615 字段与报文 |
+| [docs/07-编译发布](docs/07-手动编译发布手册.md) | 构建、验收、发布记录 |
 | [docs/08-通达信资料索引](docs/08-通达信资料索引.md) | 协议来源、探针、研究台账 |
 | [docs/12-数据覆盖审计](docs/12-数据覆盖审计.md) | 每个数据集的实际覆盖与边界 |
 | [docs/18-离线数据并行同步](docs/18-离线数据并行同步.md) | 多进程/多线程、缓存、1m、性能 |
 | [docs/19-MAC协议与数据源策略](docs/19-MAC协议与数据源策略.md) | MAC 覆盖与回退 |
 | [docs/21-通达信协议总表](docs/21-通达信协议总表.md) | 命令/入口/字段总表 |
+| [docs/22-前端设计与开发方案](docs/22-前端设计与开发方案.md) | 界面结构、设计令牌、图表、状态 |
+| [docs/23-前后端边界与双端一致性](docs/23-前后端边界与双端一致性.md) | TS/Python 边界、映射、核对表 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更 |
-| [RELEASE_NOTES-1.4.0.md](RELEASE_NOTES-1.4.0.md) | 1.4.0 发布说明 |
+| [RELEASE_NOTES-1.5.0.md](RELEASE_NOTES-1.5.0.md) | 1.5.0 发布说明 |
 
 ---
 
@@ -309,3 +369,5 @@ docs/            是什么、为什么、协议与发布记录
 - 退市代码不在当前代码表里，`delisted` 必须显式提供代码。
 - `volume_profile`（0x051a）在免费主站全部超时，不进预设。
 - 节假日表缺省只按周末判断；需要精确判断时在数据目录放 `trading_holidays.json`。
+- 桌面与 Web 各自启动一个 Python 后端进程；同机同时运行时会有两条 7709 连接，
+  长期目标是单后端 + 桌面连 HTTP（见 `PLAN.md` 技术债）。

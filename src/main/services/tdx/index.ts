@@ -1,10 +1,10 @@
 /**
  * 通达信行情门面。
  *
- * 真正的 TCP/协议/解析在 Python 桥接进程里；这里只做：
+ * 真正的 TCP/协议/解析/缓存/合并都在 Python 桥接进程里；这里只做：
  *   · 把渲染层的请求翻译成 JSON 命令；
- *   · 缓存 K 线/分时这类低频数据；
- *   · 维护代码表 + 拼音搜索索引。
+ *   · 维护代码表 + 拼音搜索索引（纯展示用的本地索引）；
+ *   · 校验代码是否属于 A 股。
  */
 import type {
   AuctionArchiveBatchResult,
@@ -74,10 +74,7 @@ import type {
 } from '@shared/types'
 import type { ChartPatternsRequest, ChartPatternsResult } from '@shared/patterns'
 import type { CategoryRequest, TradesRequest } from '@shared/ipc'
-import { fetchLiveKline, type LiveKlineState } from '@shared/kline-live'
 import { splitCode } from '@shared/market'
-import { createBreadthLoader } from './breadth'
-import { TtlCache } from '../cache'
 import { CODE_LIST_TIMEOUT_MS, QUOTES_TIMEOUT_MS, TdxBridge, TdxError } from './bridge'
 import { buildSearchEntries, searchEntries, type SearchEntry, type SearchSecurity } from './search'
 import type { SecurityInfo } from './types'
@@ -86,13 +83,6 @@ const bridge = new TdxBridge()
 
 /** 实时行情一次编排内部最多串行 4 个 7709 请求，总时长要给足 */
 const LIVE_QUOTES_TIMEOUT_MS = 35_000
-
-const minuteCache = new TtlCache<MinuteTrend>(10_000)
-const fiveDayCache = new TtlCache<MultiDayTrend>(60_000)
-const klineCache = new TtlCache<KLineSeries>(60_000)
-
-/** 实时 K 线的增量策略与 Web 共用，见 @shared/kline-live */
-const liveKlineCache = new Map<string, LiveKlineState>()
 
 interface CodeIndex {
   byCode: Map<string, SecurityInfo>
@@ -400,57 +390,38 @@ export async function fetchF10Statement(
 
 /* ---------------------------------------------------------------- 数据工具 */
 
-interface BreadthPage {
-  up: number
-  down: number
-  flat: number
-  limitUp: number
-  limitDown: number
-  total: number
-  nextStart: number | null
-  updatedAt: number
+interface BreadthStep {
+  done: boolean
+  result?: MarketBreadth
+  scanId?: number
 }
 
 /**
- * 涨跌家数按页扫：每 8 页（640 只）发一次请求，页间让 priority 的图表请求
- * 插队。整包扫描会独占串行 sidecar 5~7 秒，期间切股票/切分时都要等。
+ * 全市场涨跌家数：分页扫描仍由壳层驱动，这样每条命令之间可以插入图表/逐笔
+ * 请求；缓存 TTL、跨日失效与计数规则全部在 Python Bridge 里，Web 端走同一份。
  */
 async function scanMarketBreadth(): Promise<MarketBreadth> {
-  let start = 0
-  let up = 0
-  let down = 0
-  let flat = 0
-  let limitUp = 0
-  let limitDown = 0
-
+  const begun = await bridge.send<BreadthStep>('breadth_begin', {}, 20_000)
+  if (begun.done && begun.result) return begun.result
+  const scanId = begun.scanId
+  if (!scanId) throw new TdxError('涨跌家数扫描未返回 scanId')
   for (let request = 0; request < 200; request += 1) {
-    const page = await bridge.send<BreadthPage>('market_breadth_page', { start, pages: 8 }, 60_000)
-    up += page.up
-    down += page.down
-    flat += page.flat
-    limitUp += page.limitUp
-    limitDown += page.limitDown
-    if (page.nextStart == null) {
-      return {
-        up,
-        down,
-        flat,
-        limitUp,
-        limitDown,
-        total: up + down + flat,
-        updatedAt: page.updatedAt
-      }
-    }
-    start = page.nextStart
+    const step = await bridge.send<BreadthStep>('breadth_step', { scanId, pages: 8 }, 60_000)
+    if (step.done && step.result) return step.result
   }
   throw new TdxError('涨跌家数分页异常')
 }
 
-// 按时段缓存：交易 15 秒、午休 120 秒、收盘 300 秒，跨日失效。
-const loadBreadthCached = createBreadthLoader()
+/** 多窗口共用一轮扫描，避免主窗口/独立窗口各自开扫。 */
+let breadthInFlight: Promise<MarketBreadth> | null = null
 
-export async function fetchMarketBreadth(): Promise<MarketBreadth> {
-  return loadBreadthCached(scanMarketBreadth)
+export function fetchMarketBreadth(): Promise<MarketBreadth> {
+  if (!breadthInFlight) {
+    breadthInFlight = scanMarketBreadth().finally(() => {
+      breadthInFlight = null
+    })
+  }
+  return breadthInFlight
 }
 
 const DATA_TIMEOUT_MS = 180_000
@@ -698,36 +669,26 @@ export async function fetchKline(
     period,
     count: safeCount,
     adjust,
+    cacheOnly,
+    fresh,
     ...(anchorDate ? { anchorDate } : {})
   }
-  if (cacheOnly) {
-    // 首屏本地缓存：插到队首，别排在行情/迷你图后面。
-    return bridge.send<KLineSeries>(
-      'kline',
-      { ...request, cacheOnly: true },
-      QUOTES_TIMEOUT_MS,
-      true
-    )
-  }
-  /*
-   * fresh 是给「主进程推送」用的：面板订阅必须拿到本次请求的真实行情，
-   * 不能把 60 秒 TTL 的旧 K 线当成实时推送。用户手动点刷新仍走缓存合并。
-   */
-  if (fresh) {
-    return bridge.send<KLineSeries>('kline', request)
-  }
-  const key = `${code}:${period}:${safeCount}:${adjust}:${anchorDate ?? ''}`
-
-  return klineCache.resolve(key, () => bridge.send<KLineSeries>('kline', request))
+  // 首屏本地缓存请求插到队首，别排在行情/迷你图后面；TTL 与合并都在 Python。
+  return bridge.send<KLineSeries>(
+    'kline_cached',
+    request,
+    cacheOnly ? QUOTES_TIMEOUT_MS : undefined,
+    cacheOnly
+  )
 }
 
 /**
  * 每秒推送给图表的 K 线：
- *  - 首帧由 fetchPushTask 调 fetchKline 拿全量；
- *  - 这里只取最近 20 根，并在主进程合并进 800 根缓存；
+ *  - 首帧全量；
+ *  - 之后 60 秒内只取最近 20 根；
  *  - 每 60 秒补一次全量，避免 20 根窗口被长时间运行甩开。
  *
- * 增量策略与 Web 共用 `fetchLiveKline`，这里只注入 IPC 拉取与主进程缓存。
+ * 增量策略与缓存全部在 Python Bridge；这里只转发 IPC。
  */
 export async function fetchKlineLive(
   code: string,
@@ -737,16 +698,11 @@ export async function fetchKlineLive(
   first = false
 ): Promise<KLineSeries> {
   assertSupported(code)
-  return fetchLiveKline(
-    { code, period, count, adjust },
-    first,
-    (wanted, tail) =>
-      bridge.send<KLineSeries>(
-        'kline',
-        { code, period, count: wanted, adjust },
-        tail ? QUOTES_TIMEOUT_MS : undefined
-      ),
-    liveKlineCache
+  // 首帧全量、每 60 秒补全量、平时只取 20 根：全部在 Python Bridge 内完成。
+  return bridge.send<KLineSeries>(
+    'kline_live',
+    { code, period, count, adjust, first },
+    first ? undefined : QUOTES_TIMEOUT_MS
   )
 }
 
@@ -766,9 +722,7 @@ export async function fetchMinuteTrend(
    * 十几秒才出图」的直接原因（K 线 cacheOnly 早就 priority=true）。
    */
   if (fresh) return bridge.send<MinuteTrend>('minute', { code }, undefined, true)
-  return minuteCache.resolve(code, () =>
-    bridge.send<MinuteTrend>('minute', { code }, undefined, true)
-  )
+  return bridge.send<MinuteTrend>('minute_cached', { code }, undefined, true)
 }
 
 export async function fetchFiveDayTrend(
@@ -780,9 +734,7 @@ export async function fetchFiveDayTrend(
   if (signal?.aborted) throw new TdxError('请求已取消')
 
   if (fresh) return bridge.send<MultiDayTrend>('five_day', { code }, undefined, true)
-  return fiveDayCache.resolve(code, () =>
-    bridge.send<MultiDayTrend>('five_day', { code }, undefined, true)
-  )
+  return bridge.send<MultiDayTrend>('five_day_cached', { code }, undefined, true)
 }
 
 /* ------------------------------------------------------------------ 搜索 */
@@ -815,12 +767,9 @@ function assertSupported(code: string): void {
   }
 }
 
-/** 供「强制刷新」使用：清掉所有行情衍生缓存 */
-export function invalidateTrendCache(): void {
-  minuteCache.clear()
-  fiveDayCache.clear()
-  klineCache.clear()
-  liveKlineCache.clear()
+/** 供「强制刷新」使用：清掉 Python 侧所有行情衍生缓存 */
+export function invalidateTrendCache(): Promise<unknown> {
+  return bridge.send('invalidate_caches', {}, 5_000)
 }
 
 /** 应用退出时释放 Python 子进程 */

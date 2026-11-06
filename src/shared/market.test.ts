@@ -4,8 +4,10 @@ import {
   isIndexCode,
   joinCode,
   marketSession,
+  IDLE_POLL_MIN_MS,
   msUntilSessionChange,
   normalizeCode,
+  pollDelayMs,
   shanghaiClock,
   splitCode
 } from './market'
@@ -181,15 +183,35 @@ describe('shanghaiClock（主界面北京时间）', () => {
   })
 })
 
+describe('pollDelayMs（桌面与 Web 共用降频规则）', () => {
+  it('交易时段保持用户设置的间隔', () => {
+    expect(pollDelayMs(1000, new Date('2026-11-02T02:00:00Z'))).toBe(1000)
+    expect(pollDelayMs(3000, new Date('2026-11-02T02:00:00Z'))).toBe(3000)
+  })
+
+  it('午休/收盘放大 10 倍，且不低于 30 秒', () => {
+    expect(pollDelayMs(1000, new Date('2026-11-02T04:00:00Z'))).toBe(IDLE_POLL_MIN_MS)
+    expect(pollDelayMs(5000, new Date('2026-11-02T04:00:00Z'))).toBe(50_000)
+    expect(pollDelayMs(1000, new Date('2026-11-02T08:00:00Z'))).toBe(IDLE_POLL_MIN_MS)
+  })
+
+  it('周末按休市降频', () => {
+    expect(pollDelayMs(1000, new Date('2026-11-07T02:00:00Z'))).toBe(IDLE_POLL_MIN_MS)
+  })
+})
+
 describe('msUntilSessionChange（定时器对齐交易时段）', () => {
   it('午休末尾会精确对齐 13:00', () => {
     // 2026-11-02 是周一，12:59:30 北京时间 = 04:59:30Z
     expect(msUntilSessionChange(new Date('2026-11-02T04:59:30Z'))).toBe(30_000)
   })
 
-  it('午休中段不会为了边界空转，仍返回真实间隔', () => {
-    // 11:30 刚收盘，下一次边界是 13:00；这里只验证下一个边界是 13:00
-    expect(msUntilSessionChange(new Date('2026-11-02T03:30:00Z'))).toBe(90 * 60_000)
+  it('刚跨过边界时返回 0，低频等待只多等 250ms 就恢复', () => {
+    expect(msUntilSessionChange(new Date('2026-11-02T03:30:00Z'))).toBe(0)
+  })
+
+  it('临近边界不足 500ms 也要返回，不能跳过', () => {
+    expect(msUntilSessionChange(new Date('2026-11-02T04:59:59.600Z'))).toBe(400)
   })
 
   it('收盘后跨过周末指向周一 09:15', () => {

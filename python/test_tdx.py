@@ -13,6 +13,7 @@ import struct
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 import tdx_bridge as tdx
@@ -1093,17 +1094,14 @@ class TestTqlexFailover(unittest.TestCase):
         self.f10 = tdx_f10
         self.saved_cooldown = dict(tdx_f10._tqlex_cooldown)
         self.saved_latency = dict(tdx_f10._tqlex_latency)
-        self.saved_good = tdx_f10._tqlex_last_good
         tdx_f10._tqlex_cooldown.clear()
         tdx_f10._tqlex_latency.clear()
-        tdx_f10._tqlex_last_good = None
 
     def tearDown(self):
         self.f10._tqlex_cooldown.clear()
         self.f10._tqlex_cooldown.update(self.saved_cooldown)
         self.f10._tqlex_latency.clear()
         self.f10._tqlex_latency.update(self.saved_latency)
-        self.f10._tqlex_last_good = self.saved_good
 
     def test_fastest_host_is_tried_first(self):
         hosts = self.f10._tqlex_bases()
@@ -1160,44 +1158,178 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestMarketBreadthPage(unittest.TestCase):
-    """涨跌家数分页：整包扫描要拆成多次请求，图表 priority 才能在页间插队。"""
+class TestBridgeDataCache(unittest.TestCase):
+    """桌面/Web 共用的 Python 数据缓存：TTL、增量 K 线、涨跌家数跨日。"""
 
-    @staticmethod
-    def quote(code: str, change_pct: float) -> dict:
-        return {
-            "code": code,
-            "name": "测试",
-            "changePct": change_pct,
-            "prevClose": 10.0,
-            "price": 11.0,
-            "high": 11.0,
-            "low": 9.0,
-        }
+    def setUp(self) -> None:
+        self.bridge = tdx.Bridge()
 
-    def test_page_skips_finance_attachment(self) -> None:
-        bridge = tdx.Bridge()
-        calls: list[dict] = []
-        bridge.category_quotes = lambda **kwargs: calls.append(kwargs) or []
-        bridge.market_breadth_page(start=0, pages=1)
-        self.assertEqual(len(calls), 1)
-        self.assertFalse(calls[0]["with_finance"])
+    def test_kline_cached_reuses_within_ttl_and_fresh_bypasses(self) -> None:
+        calls: list[int] = []
 
-    def test_page_reports_next_start_and_counts(self) -> None:
-        bridge = tdx.Bridge()
-        pages = {
-            0: [self.quote("600000", 1.0)] * 80,
-            80: [self.quote("000001", -1.0)] * 2,
-        }
-        bridge.category_quotes = lambda **kwargs: pages.get(kwargs["start"], [])
+        def fake(code, period, count, adjust="qfq", **kwargs):
+            calls.append(count)
+            return {"code": code, "period": period, "bars": [{"date": "2026-11-06"}]}
 
-        first = bridge.market_breadth_page(start=0, pages=1)
-        self.assertEqual(first["nextStart"], 80)
-        self.assertEqual(first["total"], 80)
-        self.assertEqual(first["up"], 80)
+        self.bridge.kline = fake
+        with patch("tdx_bridge.time.monotonic", return_value=1000.0):
+            first = self.bridge.kline_cached("sh600519", "day", 800)
+            second = self.bridge.kline_cached("sh600519", "day", 800)
+            self.assertIs(first, second)
+            self.assertEqual(calls, [800])
+            self.bridge.kline_cached("sh600519", "day", 800, fresh=True)
+            self.assertEqual(calls, [800, 800])
 
-        final = bridge.market_breadth_page(start=0, pages=8)
-        self.assertIsNone(final["nextStart"])
-        self.assertEqual(final["total"], 82)
-        self.assertEqual(final["up"], 80)
-        self.assertEqual(final["down"], 2)
+    def test_kline_cached_expires_after_ttl(self) -> None:
+        calls: list[int] = []
+
+        def fake(code, period, count, adjust="qfq", **kwargs):
+            calls.append(count)
+            return {"code": code, "period": period, "bars": []}
+
+        self.bridge.kline = fake
+        with patch("tdx_bridge.time.monotonic", return_value=1000.0):
+            self.bridge.kline_cached("sh600519", "day", 800)
+        with patch("tdx_bridge.time.monotonic", return_value=1061.0):
+            self.bridge.kline_cached("sh600519", "day", 800)
+        self.assertEqual(calls, [800, 800])
+
+    def test_kline_live_merges_tail_without_losing_history(self) -> None:
+        base = [{"date": "2026-11-05"}, {"date": "2026-11-06"}]
+        tail = [{"date": "2026-11-06", "close": 11}, {"date": "2026-11-07"}]
+
+        persist_flags: list[bool] = []
+
+        def fake(code, period, count, adjust="qfq", **kwargs):
+            persist_flags.append(kwargs.get("persist", True))
+            if count == 800:
+                return {"code": code, "period": period, "bars": list(base)}
+            return {"code": code, "period": period, "bars": list(tail)}
+
+        self.bridge.kline = fake
+        with patch("tdx_bridge.time.monotonic", return_value=1000.0):
+            self.bridge.kline_live("sh600519", "day", 800, first=True)
+        with patch("tdx_bridge.time.monotonic", return_value=1010.0):
+            result = self.bridge.kline_live("sh600519", "day", 800)
+        self.assertTrue(result["tail"])
+        # 全量落盘，tail 不落盘
+        self.assertEqual(persist_flags, [True, False])
+        cached = self.bridge._kline_live_cache["sh600519:day:800:qfq"][0]
+        self.assertEqual([bar["date"] for bar in cached["bars"]], ["2026-11-05", "2026-11-06", "2026-11-07"])
+        self.assertEqual(cached["bars"][1]["close"], 11)
+
+    def test_kline_live_refetches_on_gap_and_interval(self) -> None:
+        base = [{"date": "2026-11-01"}, {"date": "2026-11-02"}]
+        tail = [{"date": f"2026-11-{day:02d}"} for day in range(3, 23)]
+        full_calls = 0
+
+        def fake(code, period, count, adjust="qfq", **kwargs):
+            nonlocal full_calls
+            if count == 800:
+                full_calls += 1
+                return {"code": code, "period": period, "bars": list(base)}
+            return {"code": code, "period": period, "bars": list(tail)}
+
+        self.bridge.kline = fake
+        with patch("tdx_bridge.time.monotonic", return_value=1000.0):
+            self.bridge.kline_live("sh600519", "day", 800, first=True)
+        with patch("tdx_bridge.time.monotonic", return_value=1010.0):
+            self.bridge.kline_live("sh600519", "day", 800)
+        self.assertEqual(full_calls, 2)
+        with patch("tdx_bridge.time.monotonic", return_value=1070.0):
+            self.bridge.kline_live("sh600519", "day", 800)
+        self.assertEqual(full_calls, 3)
+
+    def test_minute_and_five_day_cache(self) -> None:
+        minute_calls: list[str] = []
+        five_calls: list[str] = []
+        self.bridge.minute = lambda code: minute_calls.append(code) or {"code": code, "points": []}
+        self.bridge.five_day = lambda code: five_calls.append(code) or {"days": [], "code": code}
+        with patch("tdx_bridge.time.monotonic", return_value=1000.0):
+            one = self.bridge.minute_cached("sh600519")
+            two = self.bridge.minute_cached("sh600519")
+        self.assertIs(one, two)
+        self.assertEqual(minute_calls, ["sh600519"])
+        with patch("tdx_bridge.time.monotonic", return_value=1000.0):
+            self.bridge.five_day_cached("sh600519")
+            self.bridge.five_day_cached("sh600519", fresh=True)
+        self.assertEqual(five_calls, ["sh600519", "sh600519"])
+
+    def test_breadth_cache_aggregates_and_expires(self) -> None:
+        quotes = [
+            {
+                "code": "600000",
+                "name": "测试",
+                "changePct": 1.0,
+                "prevClose": 10.0,
+                "price": 11.0,
+                "high": 11.0,
+                "low": 9.0,
+            }
+        ] * 80
+        calls: list[int] = []
+
+        def fake_category(**kwargs):
+            calls.append(kwargs["start"])
+            return quotes if kwargs["start"] == 0 else []
+
+        self.bridge.category_quotes = fake_category
+        with patch("tdx_bridge.breadth_ttl", return_value=60.0), patch(
+            "tdx_bridge.shanghai_day", return_value="2026-11-06"
+        ):
+            begun = self.bridge.breadth_begin()
+            self.assertFalse(begun["done"])
+            step = self.bridge.breadth_step(begun["scanId"], 8)
+            self.assertTrue(step["done"])
+            self.assertEqual(step["result"]["up"], 80)
+            self.assertEqual(step["result"]["total"], 80)
+            # TTL 内第二次 begin 直接命中缓存，不再打上游
+            cached = self.bridge.breadth_begin()
+            self.assertTrue(cached["done"])
+            self.assertEqual(cached["result"]["total"], 80)
+        self.assertEqual(calls, [0, 80])
+
+        with patch("tdx_bridge.breadth_ttl", return_value=0.0), patch(
+            "tdx_bridge.shanghai_day", return_value="2026-11-06"
+        ):
+            self.assertFalse(self.bridge.breadth_begin()["done"])
+
+    def test_abandoned_breadth_scan_is_reset(self) -> None:
+        self.bridge.category_quotes = lambda **kwargs: []
+        with patch("tdx_bridge.breadth_ttl", return_value=0.0), patch(
+            "tdx_bridge.shanghai_day", return_value="2026-11-06"
+        ):
+            with patch("tdx_bridge.time.monotonic", return_value=1000.0):
+                first = self.bridge.breadth_begin()
+            with patch("tdx_bridge.time.monotonic", return_value=1061.0):
+                second = self.bridge.breadth_begin()
+        self.assertFalse(first["done"])
+        self.assertFalse(second["done"])
+        self.assertNotEqual(first["scanId"], second["scanId"])
+
+    def test_merge_kline_bars_same_vector_as_ts(self) -> None:
+        """与 src/shared 的 realtime.test 使用同一组日期向量。"""
+        merged = tdx.merge_kline_bars(
+            [{"date": "2026-11-03"}, {"date": "2026-11-04"}],
+            [{"date": "2026-11-04", "close": 11}, {"date": "2026-11-05"}],
+        )
+        self.assertEqual(
+            [bar["date"] for bar in merged],
+            ["2026-11-03", "2026-11-04", "2026-11-05"],
+        )
+        self.assertEqual(merged[1]["close"], 11)
+
+    def test_invalidate_caches_clears_all(self) -> None:
+        self.bridge._kline_cache["x"] = (0.0, {})
+        self.bridge._minute_cache["x"] = (0.0, {})
+        self.bridge._five_day_cache["x"] = (0.0, {})
+        self.bridge._kline_live_cache["x"] = ({}, 0.0)
+        self.bridge._breadth_cache = {"total": 1}
+        self.bridge._breadth_scan = {"id": 1}
+        self.bridge.invalidate_caches()
+        self.assertEqual(self.bridge._kline_cache, {})
+        self.assertEqual(self.bridge._minute_cache, {})
+        self.assertEqual(self.bridge._five_day_cache, {})
+        self.assertEqual(self.bridge._kline_live_cache, {})
+        self.assertIsNone(self.bridge._breadth_cache)
+        self.assertIsNone(self.bridge._breadth_scan)

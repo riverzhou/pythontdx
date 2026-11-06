@@ -92,6 +92,22 @@ class TestSubscriptionHub(unittest.TestCase):
         with self.assertRaises(ValueError):
             hub.subscribe([], 1000)
 
+    def test_boundary_caps_low_frequency_wait(self):
+        hub = SubscriptionHub(
+            lambda codes: [{"code": codes[0]}],
+            interval_for=lambda interval: interval * 10,
+            boundary_for=lambda: 1000,
+        )
+        # 30 秒低频等待被 1 秒后的时段边界封顶，额外留 250ms
+        self.assertAlmostEqual(hub.wait_seconds(3.0), 1.25, places=3)
+        # 不足 500ms 的临近边界同样要封顶，不能睡过开盘
+        near = SubscriptionHub(
+            lambda codes: [{"code": codes[0]}],
+            interval_for=lambda interval: interval * 10,
+            boundary_for=lambda: 400,
+        )
+        self.assertAlmostEqual(near.wait_seconds(3.0), 0.65, places=3)
+
     def test_interval_for_scales_polling(self):
         calls: list[float] = []
         lock = threading.Lock()

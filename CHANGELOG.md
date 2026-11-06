@@ -10,6 +10,84 @@ pythontdx 的所有重要变更都记录在这里。
 
 ---
 
+## [1.5.0] - 2026-11-06
+
+### 新增
+
+- **社区 PR #1 合并**（`perf/closing-downshift-and-locks`）：
+  - 收盘/午休自动降频：桌面 `QuotePoller` 与 Web SSE/WS 按交易时段降速；
+  - 涨跌家数改分页扫描，页间释放行情锁，Web 端加按时段 TTL 与跨日失效；
+  - F10 路由移出行情锁；7615 网关按最近成功延迟排序，失败站点冷却 60 秒；
+  - 行情编排（0x054c 快照 → 0x0547 增量 → 合并 → 竞价兜底 → MAC 兜底）
+    下沉 Python `Bridge.live_quotes`，桌面 IPC / HTTP / SSE / WS 共用；
+  - 逐笔面板收盘后降频；Web/K 线推送防重入并复用 tail 策略。
+- **两条架构原则**：写入 `PRINCIPLES.md`：
+  - **A2** 数据逻辑归 Python，前端 TS 只负责展示与传输；
+  - **A8** Web 与 Electron 同源：同一命令、同一响应、同一测试。
+- **边界文档**：新增 `docs/23-前后端边界与双端一致性.md`，含职责矩阵、
+  两端映射表、缓存规则、反模式与发布前核对表。
+
+### 变更
+
+- **数据缓存下沉 Python**：分时 10s、五日 60s、K 线 60s TTL 统一由
+  `minute_cached` / `five_day_cached` / `kline_cached` 提供；删除 TS
+  `TtlCache`、`services/tdx/breadth.ts`、`shared/kline-live.ts`。
+- **实时 K 线增量统一**：首帧全量、tail 20 根、60 秒补全量、断层重取全部在
+  `Bridge.kline_live`；桌面与 Web 不再各自维护缓存。tail 不落盘，避免每秒
+  重写 20 根 parquet。
+- **涨跌家数统一**：扫描状态、计数、TTL、跨日失效移到 Bridge
+  `breadth_begin/breadth_step`；桌面只驱动分步命令，Web 服务端只做 single-flight。
+- **轮询降频统一**：新增 `pollDelayMs()`；桌面 Poller 与 Web 轮询降级共用；
+  Python `_quote_interval()` 使用同一组测试向量。
+- **阅读文档重写**：README、`docs/02`、`docs/22` 按 1.5.0 架构更新。
+
+### 修复
+
+- **盘中行情时间显示「—」**：Python 合并快照时把 `updateTime` 置 `None`，
+  JSON 到 TS 变 `null`，状态栏用 `!== undefined` 判断导致不再回退本地接收时间。
+  现在删除该字段，状态栏同时兼容 `null`。
+- **Windows 跨源写请求 `ConnectionAbortedError`**：403 响应前未排空请求体，
+  Windows 发 RST。现在先读完合法长度的 body，再回 403 并关闭连接。
+- **时段边界盲区**：低频轮询在 12:59:59.6 醒来时会跳过 0~500ms 的边界，
+  13:00 第一帧被拖后 30 秒。TS/Python 都改为不跳过临近边界，并补测试。
+- **取消订阅后空转**：`QuotePoller` 在途请求的 `finally` 会重新排定时器；
+  现在用 `active` 标记阻止，主动取消不再推 error 帧。新增 `poller.test.ts`。
+- **Web 轮询堆叠**：`setInterval` 改为链式 `setTimeout` + 在途判断，失败按
+  1/2/4/8/10 秒退避，与桌面一致；SSE 断流会回退轮询。
+- **Python 缓存无上限**：行情缓存增加 256 项 FIFO 上限，实时 K 线 128 项，
+  避免长时间看全市场后内存持续增长。
+
+### 工程
+
+- `python/tdx_bridge.py`：新增 `kline_cached`、`kline_live`、`minute_cached`、
+  `five_day_cached`、`breadth_begin/step`、`invalidate_caches`、
+  `ms_until_session_change`；`kline` 增加 `persist` 参数。
+- `python/tdx_server.py`：K 线/分时/五日走缓存方法，新增 `POST /api/kline_live`；
+  涨跌家数改用 Bridge 分步扫描；跨源拒绝先排空 body。
+- `python/subscription_hub.py`：新增 `boundary_for`，低频等待被交易时段边界封顶。
+- TS：`src/main/services/tdx/index.ts` 只剩转发/校验；`src/web/http-api.ts`
+  不再持有 K 线缓存；删除 5 个 TS 模块/测试，新增 Python 缓存测试 8 个、
+  TS 轮询/时段测试 5 个。
+- `package-lock.json` 恢复 PR 中无关的 npm 元数据 churn。
+
+### 文档
+
+- README 全面重写：1.5.0 重点、架构边界、缓存规则、测试计数、文档索引。
+- `docs/02` 重写为当前双前端 + 单数据实现架构。
+- `docs/22` 更新“定时器在壳、数据规则在 Python”、K 线展示缓冲边界。
+- 新增 `docs/23`；`PRINCIPLES.md` 新增/重写 A2、A8。
+- `PLAN.md` 更新当前状态、技术债与下一步。
+
+### 验证
+
+- `npm run check` 全绿：366 TS（364 通过 / 2 skipped）+ 324 Python
+  （323 通过 / 1 skipped）。
+- 新增覆盖：Python 缓存/TTL/K 线增量/涨跌家数/时段边界/403 请求体；
+  TS `pollDelayMs`/临近边界/`QuotePoller` 取消。
+- Windows 本机构建与实机启动见 `docs/07` 第四十七节。
+
+---
+
 ## [1.4.0] - 2026-11-04
 
 ### 新增

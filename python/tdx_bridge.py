@@ -390,7 +390,8 @@ AUCTION_FALLBACK_LIMIT = 80
 def shanghai_clock(now: datetime | None = None) -> tuple[str, str]:
     """返回 (北京时间 HH:MM:SS, 交易时段)，时段划分与前端 shanghaiClock 一致。
 
-    只判断工作日/盘中时段，不含法定节假日；节假日按「已收盘」处理。
+    只判断工作日/盘中时段，不含法定节假日；工作日的节假日仍会显示交易时段
+    （与前端 shanghaiClock 一致，属于已知边界）。
     """
     moment = datetime.now(SHANGHAI_TZ) if now is None else now
     if moment.tzinfo is None:
@@ -411,6 +412,39 @@ def shanghai_clock(now: datetime | None = None) -> tuple[str, str]:
     else:
         session = "closed"
     return moment.strftime("%H:%M:%S"), session
+
+
+# 与前端 src/shared/market.ts 的 SESSION_BOUNDARIES 保持一致。
+SESSION_BOUNDARIES = ((9, 15), (9, 30), (11, 30), (13, 0), (15, 0))
+
+
+def ms_until_session_change(now: datetime | None = None) -> float:
+    """距离下一次交易时段切换还有多少毫秒（不含法定节假日）。
+
+    订阅线程在午休/收盘会降到 30 秒以上；若低频等待恰好跨过 13:00 或
+    09:30，开盘第一帧会被拖后。轮询等待用这个值封顶，在边界后 250ms 内
+    恢复。与前端 `msUntilSessionChange` 使用同一套边界。
+    """
+    moment = datetime.now(SHANGHAI_TZ) if now is None else now
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=SHANGHAI_TZ)
+    else:
+        moment = moment.astimezone(SHANGHAI_TZ)
+    best = float("inf")
+    for offset in range(8):
+        day = (moment + timedelta(days=offset)).date()
+        if day.weekday() >= 5:
+            continue
+        for hour, minute in SESSION_BOUNDARIES:
+            at = datetime(
+                day.year, day.month, day.day, hour, minute, tzinfo=SHANGHAI_TZ
+            )
+            delta = (at - moment).total_seconds() * 1000
+            # 0~500ms 的临近边界不能跳过：低频轮询可能正好在 12:59:59.6
+            # 醒来，跳过它会让 13:00 的第一帧再等一个完整周期。
+            if 0 <= delta < best:
+                best = delta
+    return best if best != float("inf") else 24 * 60 * 60 * 1000
 
 
 def _normalize_codes(codes: list[str]) -> list[str]:
@@ -478,7 +512,7 @@ def _merge_snapshot_prices(snapshots: list[dict], refreshed: list[dict]) -> list
     """盘中：0x054c 快照负责价格新鲜度，0x0547 保留五档深度与其它字段。
 
     实测免费主站的 0x0547 增量约 3 秒才推一次新价，0x054c 约 1 秒；
-    用快照覆盖价格/量/额，`updateTime` 置空，让界面显示接收时间。
+    用快照覆盖价格/量/额，并删除快照没有的 updateTime，让界面显示接收时间。
     """
     if not snapshots:
         return list(refreshed)
@@ -505,7 +539,7 @@ def _merge_snapshot_prices(snapshots: list[dict], refreshed: list[dict]) -> list
         )
         volume = max(float(snapshot.get("volume") or 0), float(base.get("volume") or 0))
         amount = max(float(snapshot.get("amount") or 0), float(base.get("amount") or 0))
-        by_code[code] = {
+        merged = {
             **base,
             "price": price,
             "prevClose": prev_close,
@@ -526,10 +560,63 @@ def _merge_snapshot_prices(snapshots: list[dict], refreshed: list[dict]) -> list
             else base.get("amplitude"),
             "time": snapshot.get("time"),
             "receivedAt": snapshot.get("receivedAt"),
-            # 快照没有交易所 updateTime；不要拿 0x0547 的旧时间冒充这一帧
-            "updateTime": None,
         }
+        # 快照没有交易所 updateTime。必须把旧字段删掉而不是置 None：
+        # JSON null 到 TS 侧仍是 null，`!== undefined` 的判断会把它当成
+        # 有效时间显示成「—」；旧实现用 undefined 表示「没有」。
+        merged.pop("updateTime", None)
+        by_code[code] = merged
     return list(by_code.values())
+
+
+# ---------------------------------------------------------------- 数据缓存
+#
+# 这些缓存属于「服务端数据逻辑」：桌面 IPC、Web HTTP、SSE/WS 必须命中
+# 同一份规则，否则桌面 10 秒缓存、Web 每次重拉会直接造成两端不一致。
+MINUTE_CACHE_TTL = 10.0
+FIVE_DAY_CACHE_TTL = 60.0
+KLINE_CACHE_TTL = 60.0
+KLINE_LIVE_TAIL = 20
+KLINE_LIVE_FULL_REFRESH = 60.0
+# 长时间运行看全市场时，缓存键会随代码数量增长；保留最近 N 个即可，
+# 过期数据本来就没有复用价值。这是上限而不是 TTL 的替代。
+CACHE_MAX_ENTRIES = 256
+KLINE_LIVE_MAX_ENTRIES = 128
+BREADTH_TRADING_TTL = 15.0
+BREADTH_LUNCH_TTL = 120.0
+BREADTH_CLOSED_TTL = 300.0
+
+
+def breadth_ttl(now: datetime | None = None) -> float:
+    """涨跌家数缓存时长：交易 15s、午休 120s、收盘 300s。"""
+    _time, session = shanghai_clock(now)
+    if session in {"trading", "pre-open"}:
+        return BREADTH_TRADING_TTL
+    if session == "lunch-break":
+        return BREADTH_LUNCH_TTL
+    return BREADTH_CLOSED_TTL
+
+
+def shanghai_day(now: datetime | None = None) -> str:
+    """北京时间日期；涨跌家数缓存跨日必须失效。"""
+    moment = datetime.now(SHANGHAI_TZ) if now is None else now
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=SHANGHAI_TZ)
+    else:
+        moment = moment.astimezone(SHANGHAI_TZ)
+    return moment.strftime("%Y-%m-%d")
+
+
+def merge_kline_bars(
+    base: list[dict], incoming: list[dict]
+) -> list[dict]:
+    """按 date 覆盖合并 K 线；tail 只有最近 20 根，不能覆盖掉本地历史。"""
+    by_date = {bar.get("date"): bar for bar in base if bar.get("date")}
+    for bar in incoming:
+        if bar.get("date"):
+            by_date[bar["date"]] = bar
+    return [by_date[key] for key in sorted(by_date)]
+
 
 TRADE_PAGE = 1800
 AUCTION_RECORD = 16
@@ -4293,6 +4380,21 @@ class Bridge:
         self.quote_watch: set[str] = set()
         self.quote_day = ""
         self.quote_baseline_at = 0.0
+        # 服务端数据缓存：桌面与 Web 共用同一份 TTL / 合并规则。
+        self._cache_lock = threading.Lock()
+        self._minute_cache: dict[str, tuple[float, dict]] = {}
+        self._five_day_cache: dict[str, tuple[float, dict]] = {}
+        self._kline_cache: dict[str, tuple[float, dict]] = {}
+        # 实时 K 线增量：key -> (完整 series, 上次全量时间 monotonic)
+        self._kline_live_cache: dict[str, tuple[dict, float]] = {}
+        self._kline_live_lock = threading.Lock()
+        # 涨跌家数：单飞行扫描状态 + 按时段 TTL 的最终结果。
+        self._breadth_lock = threading.Lock()
+        self._breadth_cache: dict | None = None
+        self._breadth_at = 0.0
+        self._breadth_day = ""
+        self._breadth_scan: dict | None = None
+        self._breadth_scan_id = 0
         # MAC 长连接按需建立；与 7709 连接分开，MAC 失败不影响主链路。
         self._mac_session = None
 
@@ -4336,6 +4438,7 @@ class Bridge:
         self.quote_watch.clear()
         self.quote_day = ""
         self.quote_baseline_at = 0.0
+        self.invalidate_caches()
         return {"preferred": selected}
 
     # -- 代码表 ---------------------------------------------------------
@@ -5308,50 +5411,106 @@ class Bridge:
             "total": up + down + flat,
         }
 
-    def market_breadth(self) -> dict:
-        """全 A 股涨跌家数（不含指数/基金）。"""
-        quotes = self._all_category_quotes(with_finance=False)
-        return {
-            **self._breadth_counts(quotes),
-            "updatedAt": int(time.time() * 1000),
-        }
+    def breadth_begin(self) -> dict:
+        """开始/复用一轮涨跌家数扫描。
 
-    def market_breadth_page(self, start: int = 0, pages: int = 8) -> dict:
-        """分页版涨跌家数：一次只扫 pages 页，队列可在页间插入图表请求。
-
-        全市场约 70 页；整包扫描会独占 sidecar 串行队列 5~7 秒。
-        主进程按 nextStart 循环调用，每页之间让 priority 请求先走。
+        缓存仍有效时直接返回最终结果；否则返回 scanId，由调用方分步调用
+        `breadth_step`。桌面主进程靠「一条命令一步」在页间插入图表请求，
+        Web 服务端则在每步之间释放行情锁。
         """
-        start = max(0, int(start))
-        pages = max(1, min(20, int(pages)))
-        quotes: list[dict] = []
-        done = False
-
-        for _ in range(pages):
-            if start >= 6400:
-                done = True
-                break
-            page = self.category_quotes(
-                category=6,
-                sort_type=0x000E,
-                start=start,
-                count=80,
-                with_finance=False,
+        with self._breadth_lock:
+            now = time.monotonic()
+            day = shanghai_day()
+            if (
+                self._breadth_cache is not None
+                and self._breadth_day == day
+                and now - self._breadth_at < breadth_ttl()
+            ):
+                return {"done": True, "result": self._breadth_cache}
+            # 客户端中途放弃（超时/关标签页）会留下半轮扫描；超过 60 秒就作废，
+            # 避免把几分钟前的页计数和现在的页拼在一起。
+            stale = (
+                self._breadth_scan is not None
+                and now - float(self._breadth_scan.get("at", now)) > 60.0
             )
-            if not page:
-                done = True
-                break
-            quotes.extend(page)
-            start += len(page)
-            if len(page) < 80:
-                done = True
-                break
+            if self._breadth_scan is None or stale:
+                self._breadth_scan_id += 1
+                self._breadth_scan = {
+                    "id": self._breadth_scan_id,
+                    "start": 0,
+                    "at": now,
+                    "up": 0,
+                    "down": 0,
+                    "flat": 0,
+                    "limitUp": 0,
+                    "limitDown": 0,
+                }
+            return {"done": False, "scanId": self._breadth_scan["id"]}
 
-        return {
-            **self._breadth_counts(quotes),
-            "nextStart": None if done else start,
-            "updatedAt": int(time.time() * 1000),
-        }
+    def breadth_step(self, scan_id: int, pages: int = 8) -> dict:
+        """扫描最多 pages 页（默认 8 页=640 只），返回累计结果或下一步游标。"""
+        pages = max(1, min(20, int(pages)))
+        with self._breadth_lock:
+            scan = self._breadth_scan
+            if scan is None or scan["id"] != int(scan_id):
+                raise TdxError("涨跌家数扫描已失效，请重新开始")
+            start = int(scan["start"])
+            up = int(scan["up"])
+            down = int(scan["down"])
+            flat = int(scan["flat"])
+            limit_up = int(scan["limitUp"])
+            limit_down = int(scan["limitDown"])
+            done = False
+            for _ in range(pages):
+                if start >= 6400:
+                    done = True
+                    break
+                page = self.category_quotes(
+                    category=6,
+                    sort_type=0x000E,
+                    start=start,
+                    count=80,
+                    with_finance=False,
+                )
+                if not page:
+                    done = True
+                    break
+                counts = self._breadth_counts(page)
+                up += counts["up"]
+                down += counts["down"]
+                flat += counts["flat"]
+                limit_up += counts["limitUp"]
+                limit_down += counts["limitDown"]
+                start += len(page)
+                if len(page) < 80:
+                    done = True
+                    break
+            if done:
+                result = {
+                    "up": up,
+                    "down": down,
+                    "flat": flat,
+                    "limitUp": limit_up,
+                    "limitDown": limit_down,
+                    "total": up + down + flat,
+                    "updatedAt": int(time.time() * 1000),
+                }
+                self._breadth_cache = result
+                self._breadth_at = time.monotonic()
+                self._breadth_day = shanghai_day()
+                self._breadth_scan = None
+                return {"done": True, "result": result}
+            scan.update(
+                {
+                    "start": start,
+                    "up": up,
+                    "down": down,
+                    "flat": flat,
+                    "limitUp": limit_up,
+                    "limitDown": limit_down,
+                }
+            )
+            return {"done": False, "nextStart": start}
 
     def formula_backtest(
         self,
@@ -7465,6 +7624,7 @@ class Bridge:
         cache_only: bool = False,
         anchor_date: str | None = None,
         start: int = 0,
+        persist: bool = True,
     ) -> dict:
         market, symbol = parse_code(code)
         if period not in PERIOD_RAW:
@@ -7528,7 +7688,9 @@ class Bridge:
                 ),
             )
             bars = parse_bars(body, kind, PERIOD_RAW[period])
-            if not safe_start:
+            # 实时 tail 每秒拉一次，不落盘；否则每只自选每秒重写一个 20 根
+            # parquet，既磨损磁盘又和 sidecar 队列抢 IO。首屏/60 秒全量仍落盘。
+            if not safe_start and persist:
                 _write_kline_cache(code, period, safe_count, cache_adjust, bars, "network")
             return {
                 "code": code,
@@ -7546,6 +7708,136 @@ class Bridge:
             if cached is not None:
                 return cached
             raise
+
+    def _ttl_get(self, store: dict[str, tuple[float, dict]], key: str, ttl: float) -> dict | None:
+        with self._cache_lock:
+            item = store.get(key)
+            if item is not None and time.monotonic() - item[0] < ttl:
+                return item[1]
+        return None
+
+    def _ttl_put(self, store: dict[str, tuple[float, dict]], key: str, value: dict) -> dict:
+        with self._cache_lock:
+            if key not in store and len(store) >= CACHE_MAX_ENTRIES:
+                # 简单 FIFO 淘汰：保留最近写入的 N 个键，避免看全市场后缓存无限增长。
+                store.pop(next(iter(store)))
+            store[key] = (time.monotonic(), value)
+        return value
+
+    def kline_cached(
+        self,
+        code: str,
+        period: str,
+        count: int,
+        adjust: str = "qfq",
+        cache_only: bool = False,
+        anchor_date: str | None = None,
+        fresh: bool = False,
+        start: int = 0,
+    ) -> dict:
+        """K 线 UI 缓存：桌面 IPC 与 Web HTTP 共用 60 秒 TTL。
+
+        `fresh` 用于推送/手动刷新，`cache_only` 用于首屏本地缓存，两者都绕过
+        TTL；分页请求（start>0）不写缓存，直接读网络。
+        """
+        safe_count = max(1, min(800, int(count)))
+        safe_start = max(0, int(start))
+        if cache_only or fresh or safe_start:
+            return self.kline(
+                code,
+                period,
+                safe_count,
+                adjust,
+                cache_only=cache_only,
+                anchor_date=anchor_date,
+                start=safe_start,
+            )
+        key = f"{code}:{period}:{safe_count}:{adjust}:{anchor_date or ''}"
+        cached = self._ttl_get(self._kline_cache, key, KLINE_CACHE_TTL)
+        if cached is not None:
+            return cached
+        return self._ttl_put(
+            self._kline_cache,
+            key,
+            self.kline(code, period, safe_count, adjust, anchor_date=anchor_date),
+        )
+
+    def _put_kline_live(self, key: str, series: dict) -> None:
+        if key not in self._kline_live_cache and len(self._kline_live_cache) >= KLINE_LIVE_MAX_ENTRIES:
+            self._kline_live_cache.pop(next(iter(self._kline_live_cache)))
+        self._kline_live_cache[key] = (series, time.monotonic())
+
+    def kline_live(
+        self,
+        code: str,
+        period: str,
+        count: int = 800,
+        adjust: str = "qfq",
+        first: bool = False,
+    ) -> dict:
+        """实时 K 线：首帧全量，之后每 60 秒内只取最近 20 根并合并。
+
+        缓存放在 Python 而不是 Electron 主进程 / 浏览器标签页：
+        同一份自选在桌面、Web、多窗口之间只维护一条 800 根基线；否则
+        每个消费者各存一份，补全/断层规则迟早漂移。
+        """
+        safe_count = max(1, min(800, int(count)))
+        key = f"{code}:{period}:{safe_count}:{adjust}"
+        with self._kline_live_lock:
+            cached = self._kline_live_cache.get(key)
+            now = time.monotonic()
+            if first or cached is None or now - cached[1] >= KLINE_LIVE_FULL_REFRESH:
+                series = self.kline(code, period, safe_count, adjust)
+                self._put_kline_live(key, series)
+                return series
+
+            tail_count = min(KLINE_LIVE_TAIL, safe_count)
+            tail = self.kline(code, period, tail_count, adjust, persist=False)
+            bars = list(tail.get("bars") or [])
+            base_bars = list(cached[0].get("bars") or [])
+            # tail 窗口装满，且第一根比本地最后一根还新：说明中间已经断层，
+            # 再合并会出现空洞，直接重取全量。
+            if bars and base_bars and len(bars) >= tail_count and bars[0]["date"] > base_bars[-1]["date"]:
+                series = self.kline(code, period, safe_count, adjust)
+                self._put_kline_live(key, series)
+                return series
+
+            merged = {**cached[0], "bars": merge_kline_bars(base_bars, bars)}
+            self._kline_live_cache[key] = (merged, cached[1])
+            return {**tail, "tail": True}
+
+    def minute_cached(self, code: str, fresh: bool = False) -> dict:
+        """分时 UI 缓存 10 秒；推送/手动刷新传 fresh=True 绕过。"""
+        if fresh:
+            return self.minute(code)
+        cached = self._ttl_get(self._minute_cache, code, MINUTE_CACHE_TTL)
+        if cached is not None:
+            return cached
+        return self._ttl_put(self._minute_cache, code, self.minute(code))
+
+    def five_day_cached(self, code: str, fresh: bool = False) -> dict:
+        """五日分时 UI 缓存 60 秒；推送/手动刷新传 fresh=True 绕过。"""
+        if fresh:
+            return self.five_day(code)
+        cached = self._ttl_get(self._five_day_cache, code, FIVE_DAY_CACHE_TTL)
+        if cached is not None:
+            return cached
+        return self._ttl_put(self._five_day_cache, code, self.five_day(code))
+
+    def invalidate_caches(self) -> dict:
+        """切换主站/手动刷新时清空所有 UI 数据缓存。"""
+        with self._cache_lock:
+            self._minute_cache.clear()
+            self._five_day_cache.clear()
+            self._kline_cache.clear()
+        with self._kline_live_lock:
+            self._kline_live_cache.clear()
+        with self._breadth_lock:
+            self._breadth_cache = None
+            self._breadth_at = 0.0
+            self._breadth_day = ""
+            self._breadth_scan = None
+        return {"ok": True}
 
     def day_file_archive_save(self, code: str) -> dict:
         """用 0x06b9 下载官方 vipdoc 日线文件，避免 0x052d 逐页翻全历史。
@@ -8484,13 +8776,15 @@ def dispatch(bridge: Bridge, cmd: str, payload: dict) -> object:
         if not isinstance(bars, list):
             raise TdxError("bars 必须是数组")
         return bridge.local_min_write(str(payload.get("path") or ""), bars)
-    if cmd == "market_breadth_page":
-        return bridge.market_breadth_page(
-            start=int(payload.get("start", 0)),
-            pages=int(payload.get("pages", 8)),
+    if cmd == "breadth_begin":
+        return bridge.breadth_begin()
+    if cmd == "breadth_step":
+        return bridge.breadth_step(
+            int(payload.get("scanId", 0)),
+            int(payload.get("pages", 8)),
         )
-    if cmd == "market_breadth":
-        return bridge.market_breadth()
+    if cmd == "invalidate_caches":
+        return bridge.invalidate_caches()
     if cmd == "formula_backtest":
         return bridge.formula_backtest(
             str(payload.get("expression") or ""),
@@ -8808,6 +9102,26 @@ def dispatch(bridge: Bridge, cmd: str, payload: dict) -> object:
             str(payload.get("adjust", "qfq")),
             bool(payload.get("cacheOnly")),
             payload.get("anchorDate") or None,
+            int(payload.get("start", 0)),
+        )
+    if cmd == "kline_cached":
+        return bridge.kline_cached(
+            str(payload.get("code") or ""),
+            str(payload.get("period") or "day"),
+            int(payload.get("count", 200)),
+            str(payload.get("adjust") or "qfq"),
+            bool(payload.get("cacheOnly")),
+            payload.get("anchorDate") or None,
+            bool(payload.get("fresh")),
+            int(payload.get("start", 0)),
+        )
+    if cmd == "kline_live":
+        return bridge.kline_live(
+            str(payload.get("code") or ""),
+            str(payload.get("period") or "day"),
+            int(payload.get("count", 800)),
+            str(payload.get("adjust") or "qfq"),
+            bool(payload.get("first")),
         )
     if cmd == "data_integrity":
         return verify_data_integrity(pythontdx_data_dir())
@@ -8864,6 +9178,10 @@ def dispatch(bridge: Bridge, cmd: str, payload: dict) -> object:
         return bridge.limit_review(str(payload.get("date") or ""))
     if cmd == "minute":
         return bridge.minute(payload.get("code", ""))
+    if cmd == "minute_cached":
+        return bridge.minute_cached(
+            str(payload.get("code") or ""), bool(payload.get("fresh"))
+        )
     if cmd == "minute_archive_save":
         return bridge.minute_archive_save(str(payload.get("code") or ""))
     if cmd == "minute_archive_list":
@@ -8914,6 +9232,10 @@ def dispatch(bridge: Bridge, cmd: str, payload: dict) -> object:
         return bridge.history_minute_archive_list(int(payload.get("limit", 50)))
     if cmd == "five_day":
         return bridge.five_day(payload.get("code", ""))
+    if cmd == "five_day_cached":
+        return bridge.five_day_cached(
+            str(payload.get("code") or ""), bool(payload.get("fresh"))
+        )
     raise TdxError(f"未知命令：{cmd}")
 
 

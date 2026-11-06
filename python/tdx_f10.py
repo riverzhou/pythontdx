@@ -38,13 +38,12 @@ TQLEX_COOLDOWN = 60.0
 _tqlex_lock = threading.Lock()
 _tqlex_cooldown: dict[str, float] = {}
 _tqlex_latency: dict[str, float] = {}
-_tqlex_last_good: str | None = None
 
 
 def _tqlex_bases() -> list[str]:
     """按健康度排序网关：冷却中的排最后，其余按最近成功耗时升序。
 
-    主站可能「不超时但很慢」（实测 4~5 秒），只记 last_good 会永远优先选它；
+    主站可能「不超时但很慢」（实测 4~5 秒），只记最近成功站点会永远优先选它；
     按延迟排序能让 page2 这类 0.05 秒的网关自然顶上来。
     """
     with _tqlex_lock:
@@ -58,11 +57,9 @@ def _tqlex_bases() -> list[str]:
 
 def _mark_tqlex(base: str, ok: bool, seconds: float = 0.0) -> None:
     """记录网关状态；失败耗时同样计入排序，冷却后不会排在健康站点前面。"""
-    global _tqlex_last_good
     with _tqlex_lock:
         _tqlex_latency[base] = seconds
         if ok:
-            _tqlex_last_good = base
             _tqlex_cooldown.pop(base, None)
         else:
             _tqlex_cooldown[base] = time.monotonic() + TQLEX_COOLDOWN

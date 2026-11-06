@@ -23,7 +23,8 @@
 
 背景知识按需查 `docs/`：`01` 快速开始 · `02` 架构 · `03` 通达信协议 ·
 `04` 设计系统 · `05` 路线图 · `06` 踩坑笔记 · `07` 编译发布 ·
-`08` 资料与协议索引（G6 的研究台账）· `09` 官方功能基线（功能对齐以它为准）。
+`08` 资料与协议索引（G6 的研究台账）· `09` 官方功能基线（功能对齐以它为准）·
+`22` 前端设计 · `23` 前后端边界与双端一致性（A2/A8 的落地说明）。
 
 ---
 
@@ -104,8 +105,8 @@
 ```bash
 npm run dev                 # 开发模式（主进程重启 + 渲染层热更新 + Python 桥接）
 npm run check               # 类型 + Lint + TS 测试 + Python 测试，一条命令
-npm run test                # 只跑 TS 测试（359 个用例）
-npm run test:python         # 只跑 Python 协议/HTTP 测试（175 个用例）
+npm run test                # 只跑 TS 测试（366 个用例）
+npm run test:python         # 只跑 Python 协议/HTTP 测试（324 个用例）
 npm run audit:data          # 数据覆盖自检（39 项，会触发自动归档；清单见 docs/12）
 npm run build:python        # Nuitka 打行情桥接单文件（打包前必跑）
 npm run shot                # 构建并截图到 screenshots/，用来肉眼验收界面
@@ -128,8 +129,9 @@ npm run build:mac:all       # 散装 .app + dmg（每次版本更新后的验证
 也可用 `PYTHONTDX_PYTHON` 指定）。打包后的 exe 自带桥接程序，用户不需要 Python。
 打包前先 `python3 -m pip install -r requirements.txt`（含 pyarrow/duckdb/Nuitka/patchelf；Linux）。
 
-**v0.7 基本可用**：只读 HTTP API + Web 前端（`python3 python/tdx_server.py`、`npm run dev:web`）；
+**v1.5.0**：只读 HTTP API + Web 前端（`python3 python/tdx_server.py`、`npm run dev:web`）；
 `--web-dir out/web` 可单端口托管；Web 端自选/设置/预警/公式/持仓写 localStorage，行情仍只读；SSE + WebSocket 已接；独立窗口不可用。
+桌面走 stdio sidecar，Web 走 HTTP/SSE/WS，但行情缓存/K 线增量/涨跌家数只有 Python 一份实现。
 
 > **平台范围**：代码保持 Windows/Linux/macOS 跨平台；各自在对应系统本机构建，不做交叉编译。
 > 构建/测试环境：**Windows 10 22H2 x64、macOS 27.2 arm64、Ubuntu 26.04.1 x64**。
@@ -154,11 +156,12 @@ npm run build:mac:all       # 散装 .app + dmg（每次版本更新后的验证
 ## 四、目录速查
 
 ```
-src/main/        桌面壳：窗口、托盘、更新、拉起后端（迁移期仍含行情转发）
+src/main/        桌面壳：窗口、托盘、更新、拉起后端、传输调度（不含行情逻辑）
 src/preload/     contextBridge 白名单桥（唯一同时能碰 Node 与 DOM 的地方）
 src/shared/      桌面 / Web / 后端共享的类型与纯函数（禁止平台 API）
 src/renderer/    SolidJS 界面（桌面与 Web 共用）：components / stores / lib / styles
-python/          通达信协议 + Python 服务/数据任务（目标：HTTP/WS 后端 + 数据湖）
+src/web/         Web 外壳与 HTTP/SSE/WS 适配（只做传输，不写行情逻辑）
+python/          通达信协议 + Python 服务/数据任务 + 数据湖（数据逻辑唯一实现）
 scripts/         图标生成、截图、Python 入口、协议探针
 docs/            说明文档（是什么、为什么）
 ```
@@ -167,7 +170,7 @@ docs/            说明文档（是什么、为什么）
 
 - 新的上游协议 / 字段解析 → `python/tdx_bridge.py` + `python/test_tdx.py` 加 fixture 用例
 - 主机探活 / 配置 / 数据落盘 / 补历史 → `python/`（v0.7 起；不要再往主进程塞行情 IO）
-- 行情业务 / 缓存 → 目标在 Python；迁移期暂放 `src/main/services/tdx/index.ts`
+- 行情业务 / 缓存 / 合并 / 涨跌家数 → `python/`（1.5.0 起，不要再写 TS 版）
 - 桌面与 Web 共用的界面 → `src/renderer/`（禁止为某一端复制一套）
 - 平台外壳（窗口/托盘/更新） → `src/main/`
 - 新的全局状态 → `src/renderer/src/stores/`
@@ -178,35 +181,27 @@ docs/            说明文档（是什么、为什么）
 
 ## 五、当前阶段
 
-**v0.6 已收口；v0.7 双前端 + Python 服务化——HTTP API/SSE/WebSocket/单端口托管与 Web 前端已可用；Web 本地状态可写，行情 HTTP 仍只读。**
+**v1.5.0 已发布：社区 PR #1 收口 + 前后端边界重整。**
+行情、分时、五日、K 线增量、涨跌家数缓存全部只有 Python 一份实现；
+桌面（IPC/stdio）与 Web（HTTP/SSE/WS）只是同一批 `Bridge` 方法的两种传输。
+两条新原则已写入 `PRINCIPLES.md`：**A2** 数据逻辑归 Python、前端 TS 只负责展示与传输；
+**A8** Web/Electron 同源（同一命令、同一响应、同一测试）。
+逐项映射与核对表见 `docs/23-前后端边界与双端一致性.md`。
 
-v0.6 已把 A 股行情切到通达信 7709（Python sidecar），腾讯 web 接口与解析模块已删除。
-健康度 `npm run check` 全绿（359 个 TS 测试 + 175 个 Python 测试），
-2026-11-02 正式改名 pythontdx：旧 userData/Python 数据目录/便携目录/localStorage
-自动迁移，旧目录保留；Windows/Linux/macOS 安装包需按新名重打；
-2026-10-31 复核过构建、实机启动、包内资金流与公式多输出；
-2026-11-01/02 复核过 Windows x64 安装包 / 绿色包 / zip / 便携版（0.9.0 ~ 0.14.4 见
-`docs/07` 第十一至二十八、三十一至三十八节）；
-2026-11-02 实机打包并验收 macOS arm64 dmg（0.14.2，ad-hoc 签名），同时修掉
-thin Mach-O 误判、arm64 目标错配与 7615 系统代理超时（见 `docs/07` 第三十四节）；
-0.14.3 修首屏分时图请求优先级与涨跌家数阻塞（14.97s → 2.9s，仅 tag、无 dmg；
-见 `docs/07` 第三十六节与 `docs/06` 第 41 条）；
-0.14.4 加分时/五日本地快照（首屏 404ms）、macOS sidecar 固定路径避免重复
-Gatekeeper 扫描（二次启动 0.28s）
-与涨跌家数分页；Windows 0.14.4 四件套本机回归并自签名（安装版 K 线 353ms / 逐笔 209ms，
-见 `docs/07` 第三十八节）；macOS 散装 app + dmg 本地验证（第三十七节）；
-2026-11-01 新增左栏「自选股 / 板块 / 自定义」三视图、板块选择大窗口、
-离线数据单文件备份/恢复、数据集归档（板块/财务含三大报表/龙虎榜），并修复指数除权
-（截图与实测见 `CHANGELOG`）。
+健康度 `npm run check` 全绿（366 个 TS 测试 + 324 个 Python 测试，各 2/1 skipped）。
+1.5.0 修掉：`updateTime` JSON null 导致状态栏显示「—」、Windows 跨源 403 断连、
+0~500ms 时段边界盲区、取消订阅后轮询空转、实时 K 线 tail 每秒落盘。
+架构详情见 `docs/02`；缓存/降频规则见 `docs/23`。
 
 已交付：实时行情/盘口/多周期图表、默认五均线、全屏自选、板块/MAC/F10 19 页签、预警且/或、
-条件选股预设与自动池、公式/回测、复盘、CSV/Parquet/数据湖、
-Web 前端（本地状态写）、Linux AppImage/deb、macOS arm64 dmg，以及图表几何与协议层测试覆盖。
+条件选股预设与自动池、公式/回测、复盘、CSV/Parquet/数据湖、离线并行同步、
+Web 前端（本地状态写）、Windows x64 / Linux x64 / macOS arm64 三平台打包，
+以及图表几何、协议层、缓存/增量/时段边界测试覆盖。
 
 - 长期目标与范围：先读 `docs/00-项目章程.md`；差距与优先级见 `PLAN.md` 第二、四节
 - 平台：代码跨 Windows/Linux/macOS；在各自系统本机构建，不做交叉编译；自动化主要跑 Linux，Windows / macOS 由对应机器实测
 - 数据源只做 A 股；港股/美股/期货/期权明确不做，7727 扩展行情也不做
-- 技术债见 `PLAN.md` 第五节
+- 技术债见 `PLAN.md` 第五节（含桌面/Web 各自 Python 进程、节假日、展示缓冲合并）
 
 **开工前请先读 `PLAN.md`，收工前请更新它。**
 发布新版本时记得同步更新 `CHANGELOG.md`。

@@ -170,7 +170,12 @@ export function shanghaiClock(now: Date = new Date()): ShanghaiClock {
   }
 }
 
-/** 粗略判断 A 股当前所处的时段（不含法定节假日，节假日会显示为「已收盘」） */
+/**
+ * 粗略判断 A 股当前所处的时段。
+ *
+ * 只按星期与时钟判断，**不含法定节假日**：工作日的节假日仍会显示交易时段，
+ * 这是已知边界（与 Python `shanghai_clock` 一致）。要精确判断需引入交易日历。
+ */
 export function marketSession(now: Date = new Date()): MarketSession {
   const parts = SHANGHAI_PARTS.formatToParts(now)
   const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? ''
@@ -218,7 +223,9 @@ export function msUntilSessionChange(now: Date = new Date()): number {
     for (const [hour, minute] of SESSION_BOUNDARIES) {
       const at = Date.UTC(year, month, day + offset, hour, minute) - SHANGHAI_OFFSET_MS
       const delta = at - now.getTime()
-      if (delta > 500 && delta < best) best = delta
+      // 不要跳过 0~500ms 的临近边界：轮询可能正好在 12:59:59.6 醒来，
+      // 跳过它就会再等一个完整低频周期，13:00 的第一帧被拖后 30 秒。
+      if (delta >= 0 && delta < best) best = delta
     }
   }
 
@@ -228,4 +235,21 @@ export function msUntilSessionChange(now: Date = new Date()): number {
 export function isTradingNow(now: Date = new Date()): boolean {
   const session = marketSession(now)
   return session === 'trading' || session === 'pre-open'
+}
+
+/** 非交易时段轮询下限：再快也没有新数据，还会被上游限流。 */
+export const IDLE_POLL_MIN_MS = 30_000
+/** 非交易时段相对用户设置间隔的放大倍数。 */
+export const IDLE_POLL_SCALE = 10
+
+/**
+ * 行情轮询的有效间隔。
+ *
+ * 桌面 QuotePoller 与 Web 轮询降级共用这一条规则；Web 的 SSE/WS 在
+ * Python 侧另有一份同规则实现（`_quote_interval`），两处测试锁住。
+ */
+export function pollDelayMs(intervalMs: number, now: Date = new Date()): number {
+  const requested = Math.max(1000, Math.trunc(intervalMs) || 3000)
+  if (isTradingNow(now)) return requested
+  return Math.max(requested * IDLE_POLL_SCALE, IDLE_POLL_MIN_MS)
 }

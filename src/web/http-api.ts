@@ -71,7 +71,7 @@ import type {
   TradeTick
 } from '@shared/types'
 import type { CategoryRequest, KLineRequest, PythonTdxApi, TradesRequest } from '@shared/ipc'
-import { fetchLiveKline, type LiveKlineState } from '@shared/kline-live'
+import { msUntilSessionChange, pollDelayMs } from '@shared/market'
 import type { SearchEntry, SearchSecurity } from '@shared/search'
 import { DEFAULT_GROUP_ID, DEFAULT_SETTINGS, SEED_GROUPS, STATE_VERSION } from '@shared/types'
 import { WEB_VERSION } from './version'
@@ -153,6 +153,7 @@ export function createHttpApi(): PythonTdxApi {
   const listeners = new Set<(update: QuoteUpdate) => void>()
   let codes: string[] = []
   let timer: number | undefined
+  let pollStopped = true
   let stream: EventSource | undefined
   let ws: WebSocket | undefined
   let pollId = 0
@@ -164,26 +165,29 @@ export function createHttpApi(): PythonTdxApi {
     return state
   }
 
-  const poll = async (): Promise<void> => {
+  const poll = async (): Promise<boolean> => {
     const current = ++pollId
     try {
       const quotes = await post<Quote[]>('/api/quotes', { codes })
-      if (current !== pollId) return
+      if (current !== pollId) return false
       const update: QuoteUpdate = { quotes, at: Date.now() }
       listeners.forEach((listener) => listener(update))
+      return true
     } catch (error) {
-      if (current !== pollId) return
+      if (current !== pollId) return false
       const update: QuoteUpdate = {
         quotes: [],
         at: Date.now(),
         error: error instanceof Error ? error.message : String(error)
       }
       listeners.forEach((listener) => listener(update))
+      return false
     }
   }
 
   const stopPolling = (): void => {
-    if (timer !== undefined) window.clearInterval(timer)
+    pollStopped = true
+    if (timer !== undefined) window.clearTimeout(timer)
     timer = undefined
     stream?.close()
     stream = undefined
@@ -192,8 +196,26 @@ export function createHttpApi(): PythonTdxApi {
     pollId += 1
   }
 
+  /**
+   * 轮询降级：链式 setTimeout，上一次请求结束再排下一次，避免慢请求堆叠。
+   * 降频/边界规则与桌面 QuotePoller 共用 @shared/market 的纯函数。
+   */
   const startPolling = (intervalMs: number): void => {
-    timer = window.setInterval(() => void poll(), Math.max(1000, intervalMs || 3000))
+    pollStopped = false
+    let failures = 0
+    const step = async (): Promise<void> => {
+      if (pollStopped) return
+      const ok = await poll()
+      if (pollStopped) return
+      failures = ok ? 0 : failures + 1
+      const normal = Math.min(pollDelayMs(intervalMs), msUntilSessionChange() + 250)
+      // 与桌面 QuotePoller 相同的退避：1s/2s/4s/8s，最多 10s。
+      const wait =
+        failures > 0 ? Math.min(1000 * 2 ** (failures - 1), 10_000) : normal
+      timer = window.setTimeout(() => void step(), wait)
+    }
+    const wait = Math.min(pollDelayMs(intervalMs), msUntilSessionChange() + 250)
+    timer = window.setTimeout(() => void step(), wait)
   }
 
   const startSse = (intervalMs: number): void => {
@@ -201,8 +223,9 @@ export function createHttpApi(): PythonTdxApi {
       codes: codes.join(','),
       interval: String(Math.max(1000, intervalMs || 3000))
     })
-    stream = new EventSource(`${BASE}/api/stream?${params.toString()}`)
-    stream.onmessage = (event) => {
+    const source = new EventSource(`${BASE}/api/stream?${params.toString()}`)
+    stream = source
+    source.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data) as {
           ok: boolean
@@ -217,6 +240,13 @@ export function createHttpApi(): PythonTdxApi {
       } catch {
         // 单帧坏数据不打断连接
       }
+    }
+    source.onerror = () => {
+      if (stream !== source) return
+      source.close()
+      stream = undefined
+      // SSE 断流时退到轮询；不要停掉 subscription，页面仍要刷新。
+      if (codes.length > 0) startPolling(intervalMs)
     }
   }
 
@@ -281,18 +311,6 @@ export function createHttpApi(): PythonTdxApi {
   /** 每个订阅的停止函数：清定时器并阻止在途 tick 继续调度 */
   const pushStops = new Map<number, () => void>()
   let nextPushId = 1
-  /** 每个标签页独立的实时 K 线全量缓存；增量策略与桌面共用 */
-  const liveKlineCache = new Map<string, LiveKlineState>()
-
-  const klinePath = (task: Extract<PushTask, { kind: 'kline' }>, count: number): string => {
-    const params = new URLSearchParams({
-      code: task.code,
-      period: task.period,
-      count: String(count),
-      adjust: task.adjust
-    })
-    return `/api/kline?${params.toString()}`
-  }
 
   const fetchPushTask = (task: PushTask, first = false): Promise<unknown> => {
     switch (task.kind) {
@@ -319,21 +337,23 @@ export function createHttpApi(): PythonTdxApi {
           post<MacMoneyFlow>('/api/mac_money_flow', { code: task.code })
         ]).then(([flow, mac]) => ({ flow, mac }))
       case 'kline':
-        return fetchLiveKline(
-          {
-            code: task.code,
-            period: task.period,
-            count: task.count,
-            adjust: task.adjust
-          },
-          first,
-          (count) => request<KLineSeries>(klinePath(task, count)),
-          liveKlineCache
-        )
+        // 实时 K 线增量/全量合并由 Python Bridge 统一持有，Web 不再维护标签页缓存。
+        return post<KLineSeries>('/api/kline_live', {
+          code: task.code,
+          period: task.period,
+          count: task.count,
+          adjust: task.adjust,
+          first
+        })
       case 'minute':
-        return request<MinuteTrend>(`/api/minute?code=${encodeURIComponent(task.code)}`)
+        // 推送要绕过 10 秒 UI 缓存，否则面板会读到同一帧旧数据。
+        return request<MinuteTrend>(
+          `/api/minute?code=${encodeURIComponent(task.code)}&fresh=1`
+        )
       case 'fiveDay':
-        return request<MultiDayTrend>(`/api/five_day?code=${encodeURIComponent(task.code)}`)
+        return request<MultiDayTrend>(
+          `/api/five_day?code=${encodeURIComponent(task.code)}&fresh=1`
+        )
     }
   }
 

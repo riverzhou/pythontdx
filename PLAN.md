@@ -15,13 +15,13 @@
 
 | 项目          | 值                                                                                                                                                                                                                                                                                                                                  |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 版本          | `1.4.0`（正式发布；功能矩阵 334 ✅ / 0 🟡 / 0 ⬜ / 6 ⛔，数据边界另见 docs/12）                                                                                                                                                                                                                                                        |
-| 最近提交      | 2026-11-04 发布：**离线数据多进程/多线程/多服务器并行同步**（24 数据集、08:45–15:45 保护窗口、任务级断点续跑）；**1.4.0**：日 K 官方 0x06b9 `.day`、1m 100 日缓存/最新页刷新、Parquet CSV staging 20×、任务摘要/续跑、auction/money_flow/1m 跳过修复、计划阶段 6–7s；**吸收 gotdx/eltdx**：0x053f 九榜排行、0x0563 主力监控、0x051a 成交分布解析、订阅 Hub（SSE/WS 合并轮询）、帧长/解压上限；**P0 修复**：0x054c 记录头校验、11 类 keyed 归档按 key 分片、全量翻页只认空页、本地 `.day` 证券类型系数与残尾容忍、0x0ffc 资金流落盘、0x0010 补 5 个股本字段；新增 docs/16/17/18 |
-| 健康度        | `npm run check` 全绿（359 TS，36 个测试文件；**283 Python**，1 skipped）；`audit:data` 39/39；1m 100 只 48×4 8.2s，日 K 100 只 16×4 6.2s；离线同步面板截图 `screenshots/data-offline-sync.png` |
+| 版本          | `1.5.0`（正式发布；功能矩阵 334 ✅ / 0 🟡 / 0 ⬜ / 6 ⛔，数据边界另见 docs/12）                                                                                                                                                                                                                                                        |
+| 最近提交      | 2026-11-06：**合并社区 PR #1**（收盘降频、涨跌家数缓存、F10 解耦行情锁），审核后修复 `updateTime` null、Windows 403 断连、时段边界盲区、取消订阅空转、实时 K 线每秒落盘；**架构重整**：行情/分时/K 线增量/涨跌家数缓存全部下沉 Python，TS 只做展示与传输；新增 `PRINCIPLES.md` A2/A8 与 `docs/23`；**1.4.0 基线**：离线数据 24 数据集并行同步、日 K 官方 `.day`、1m 100 日、Parquet staging、任务续跑 |
+| 健康度        | `npm run check` 全绿（366 TS，364 通过/2 skipped；**324 Python**，323 通过/1 skipped）；新增缓存/增量/边界/取消订阅回归；`audit:data` 39/39 |
 | 数据能力      | 7709 29 命令、MAC 15 条 A 股相关、7615 51 个入口；新增 `lake/top_board`、`lake/unusual`、`lake/volume_profile`；按代码/按业务 key 分片归档 11 类，修复「同一天只存第一只」 |
 | 目标          | 桌面 + Web 双前端；A 股协议全覆盖；实时 + 离线 + 面向 ML 的数据湖（`docs/00`）                                                                                                                                                                                                                                                      |
 | 数据源        | 通达信 7709 + MAC + 7615 + 文件下载/本地文件；7727/EX 不做                                                                                                                                                                                                                                                                          |
-| 分发          | `v1.4.0`：Windows 本机构建 setup/portable/zip；tag 触发 GitHub Actions 构建 Linux/Windows/macOS 三平台 Release；GitLab 同步推送 |
+| 分发          | `v1.5.0`：Windows 本机构建 setup/portable/zip；tag 触发 GitHub Actions 构建 Linux/Windows/macOS 三平台 Release；GitLab/GitHub 同步推送 |
 | 平台验证      | 代码跨 Windows/Linux/macOS；Linux、Windows x64、macOS arm64 已实机打包验收；macOS 仅支持 Apple Silicon（2026-11-02 决定不支持 Intel）                                                                                                                                                                                               |
 | 构建/测试环境 | Windows 10 22H2 x64 · macOS 27.2 arm64 · Ubuntu 26.04.1 x64；原生编译，不做交叉编译；0.14.4 Windows 安装版 K 线 353ms / 逐笔 209ms（自签名），macOS 真首次 10,333ms、二次 365ms                                                                                                                                                     |
 
@@ -57,6 +57,24 @@ updateTime 作游标，无变化返回 0 条；客户端已缓存上一帧、按
 ---
 
 ## 二、进行中与下一阶段
+
+### P0 · 2026-11-06：PR #1 收口与前后端边界重整（已完成）
+
+用户要求：审核已合并的社区 PR；规划 TS/Python 分工，TS 只展示；保证 Web/Electron
+一致性；两条原则写入设计原则文档；彻底重整代码；全面更新 README；反复审计与
+回归测试；发布新版本、本地构建、打 tag、推送双远程并由 GitHub Actions 发布 Release。
+
+1. **PR 审核**：合并 `#1 perf/closing-downshift-and-locks`；修掉 `updateTime`
+   JSON null、Windows 跨源 403 RST、0~500ms 时段边界盲区、取消订阅后定时器复活、
+   实时 K 线 tail 每秒落盘。
+2. **边界重整**：`live_quotes`、`kline_cached`、`kline_live`、`minute_cached`、
+   `five_day_cached`、`breadth_begin/step` 全部在 `Bridge`；删除 TS `TtlCache`、
+   `services/tdx/breadth.ts`、`shared/kline-live.ts`；桌面/Web 适配器只转发。
+3. **一致性**：`pollDelayMs()` 由桌面 Poller 与 Web 轮询共用；Python
+   `_quote_interval()` 用同一组测试向量；`docs/23` 记录映射表与核对清单。
+4. **文档**：README、docs/02、docs/22、PRINCIPLES、PLAN、CHANGELOG、docs/07。
+5. **验证**：366 TS + 324 Python 全绿；Windows 本机构建与启动验收；tag `v1.5.0`
+   触发 GitHub Actions 三平台 Release。
 
 ### P0 · 2026-11-04 第二轮：数据功能收口（代码＋文档完成）
 
@@ -430,7 +448,7 @@ liveTicks 每秒增长、九宫格/ K 线 1 秒徽标；AppImage 双击修复需
 
 | #    | 债务                                                                                      | 影响                                                     | 建议处理时机                                                                                                       |
 | ---- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| TD5  | 没有 CI，所有验证靠本地手跑                                                               | 容易漏                                                   | 见第四节支撑项                                                                                                     |
+| TD5  | CI 只跑质量门禁与三平台打包，缺少数据回归/夜间实盘任务                                     | 数据类问题仍靠人工发现                                   | 后续加夜间 `audit:data` + 只读行情探针                                                                             |
 | TD6  | `screenshots/` 未纳入版本控制                                                             | 无法做视觉回归比对                                       | 若要做视觉回归，改为提交基准图 + 像素 diff                                                                         |
 | TD7  | **应用未做代码签名**                                                                      | Windows 上会被 SmartScreen / 杀毒软件拦一下              | 需要购买代码签名证书；学习项目可长期跳过                                                                           |
 | TD8  | 便携版**每次启动都要解压约 368 MB**                                                       | 冷启动比安装版慢约 1 秒（实测 2s vs 1s）                 | electron-builder 的固有行为，无法规避；已在文档中如实说明                                                          |
@@ -442,11 +460,10 @@ liveTicks 每秒增长、九宫格/ K 线 1 秒徽标；AppImage 双击修复需
 | TD14 | **Nuitka 打包需 patchelf**（Linux onefile 依赖）                                          | 缺少 patchelf 时构建失败                                 | `python3 -m pip install --user patchelf` 后重试                                                                    |
 | TD15 | **行情时间字段语义未确认**（`serverTimeRaw`）                                             | 界面暂用接收时间，非交易时段显示的不是最后成交时间       | 若要与行情软件对齐，需要继续逆向或改用日K日期 + 收盘时间                                                           |
 | TD16 | **本机 DSH 的 `read_image` 在 Linux 崩溃**（native sharp 与 Electron GLib 冲突，SIGSEGV） | 截图能生成，但我无法直接读图；视觉验收改用 DOM 文本/尺寸 | 已用用户级 WASM hook（`Module._load` + `process.dlopen` 双层）在真实 Host 验证 2560×1640 解码成功，重启 DSH 后生效 |
-| TD17 | **双前端/Python 服务化尚未动工**（主进程仍持轮询/缓存，无 Web 入口）                      | 桌面与 Web 无法共享数据；数据任务绑在窗口上              | v0.7 P0                                                                                                            |
-| TD18 | **A 股协议覆盖不足**：当前只实现 8 个 7709 命令，矩阵里还有 18 个待补                     | 功能与数据完整性受限，无法对齐官方客户端                 | 按 `docs/08` 矩阵，P1 起分批补                                                                                     |
-| TD19 | **离线数据与数据湖未开始**（官方 zip / `0x06b9` / Parquet / DuckDB）                      | 无法长期积累、无法复现、无法做 ML                        | P2                                                                                                                 |
-| TD20 | **功能对齐仍有差距**：板块/行业指数行情、选股/公式、系统通知、复盘/回放                   | G4 目标未达成                                            | P3 / P5                                                                                                            |
-| TD21 | **主机列表硬编码 5 个 IP**，没有 `connect.cfg` 解析/探活/配置覆盖                         | 主站变动即不可用；无法保证「最新」                       | v0.7 P0 / P1                                                                                                       |
+| TD17 | **桌面与 Web 各自启动一个 Python 进程**：同机同时运行会有两条 7709 连接与两份内存缓存      | 双开时资源翻倍；缓存不一致风险                           | 长期改为单后端 + 桌面连 HTTP；当前先在文档中明确                                                                   |
+| TD18 | **节假日不精确**：工作日节假日仍按交易时段轮询                                            | 假日空转；开盘/收盘判断可能多拉几帧                       | 引入交易日历（`trading_holidays.json` 已有雏形）                                                                   |
+| TD19 | **渲染层保留 K 线展示缓冲并合并 tail**                                                    | 权威缓存在 Python，但展示缓冲的合并规则需要持续对齐      | 与 Python `merge_kline_bars` 共用测试向量；禁止扩散为业务缓存                                                       |
+| TD21 | **桌面/Web 调度实现各一处**（Poller/PushHub/浏览器定时器/Python Hub）                     | 都是薄壳，但新增调度容易再写一套                         | 新增调度只复用 `pollDelayMs`/`_quote_interval` 测试向量                                                             |
 | TD22 | **外部资料与参考项目许可证未逐项核对**                                                    | 引入代码/文档时有合规风险                                | 引入前读 LICENSE 并登记到 `docs/08`                                                                                |
 
 > TD7 / TD8 / TD9 是**已知且被接受**的取舍，登记在这里是为了新接手的人不必重新发现一遍。

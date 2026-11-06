@@ -82,6 +82,8 @@ class SubscriptionHub:
 
     `interval_for` 用于按时段调整实际轮询间隔：Web 端没有主进程 poller，
     收盘/午休的降频由服务端统一处理，客户端仍按自己的 interval 声明订阅。
+    `boundary_for` 返回距下一次交易时段切换的毫秒数，用于给低频等待封顶，
+    避免午休/收盘的 30 秒等待把开盘第一帧拖后。
     """
 
     def __init__(
@@ -89,13 +91,24 @@ class SubscriptionHub:
         fetch: Callable[[list[str]], list[dict[str, Any]]],
         clock: Callable[[], float] = time.monotonic,
         interval_for: Callable[[float], float] | None = None,
+        boundary_for: Callable[[], float] | None = None,
     ) -> None:
         self._fetch = fetch
         self._clock = clock
         self._interval_for = interval_for or (lambda interval: interval)
+        self._boundary_for = boundary_for
         self._lock = threading.Lock()
         self._tasks: dict[tuple[int, tuple[str, ...]], _Task] = {}
         self._closed = False
+
+    def wait_seconds(self, interval: float) -> float:
+        """本轮实际等待秒数：时段间隔与下一次边界取小，边界后留 250ms。"""
+        delay = max(0.2, float(self._interval_for(interval)))
+        if self._boundary_for is not None:
+            boundary = self._boundary_for() / 1000.0
+            if boundary >= 0:
+                delay = min(delay, max(0.25, boundary + 0.25))
+        return max(0.2, delay)
 
     # -- public --------------------------------------------------------
 
@@ -186,7 +199,7 @@ class SubscriptionHub:
             ):
                 # 基线刚拉过，别立刻重复请求；等一个周期再进入常规轮询。
                 first_round = False
-                task.stop.wait(self._interval_for(task.interval))
+                task.stop.wait(self.wait_seconds(task.interval))
                 continue
             first_round = False
             started = self._clock()
@@ -208,7 +221,7 @@ class SubscriptionHub:
                 subscription.push(payload)
             remaining = self._interval_for(task.interval) - (self._clock() - started)
             if remaining > 0:
-                task.stop.wait(remaining)
+                task.stop.wait(min(remaining, self.wait_seconds(task.interval)))
 
 
 def normalize_key(codes: list[str], interval_ms: int) -> tuple[int, tuple[str, ...]]:

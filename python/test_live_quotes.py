@@ -1,6 +1,7 @@
 """Bridge.live_quotes 的编排测试：不连行情服务器，只验证合并与兜底顺序。"""
 
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from tdx_bridge import (
@@ -9,6 +10,7 @@ from tdx_bridge import (
     _merge_quotes,
     _merge_snapshot_prices,
     _normalize_codes,
+    ms_until_session_change,
     shanghai_clock,
 )
 
@@ -99,7 +101,9 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(merged["high"], 12)
         self.assertEqual(merged["low"], 9.8)
         self.assertEqual(len(merged["bids"]), 1)
-        self.assertIsNone(merged["updateTime"])
+        # 快照没有交易所时间：字段必须缺失，不能是 null（JSON null 会被
+        # StatusBar 的 `!== undefined` 当成有效时间显示成「—」）。
+        self.assertNotIn("updateTime", merged)
 
     def test_snapshot_empty_returns_refresh(self):
         refreshed = [quote("a", 10)]
@@ -142,6 +146,26 @@ def _tz():
     from datetime import timedelta, timezone
 
     return timezone(timedelta(hours=8))
+
+
+class SessionBoundaryTests(unittest.TestCase):
+    def test_boundary_before_open_and_lunch(self):
+        before_open = datetime(2026, 11, 5, 9, 29, 0, tzinfo=_tz())
+        self.assertAlmostEqual(ms_until_session_change(before_open), 60_000, delta=1)
+        before_afternoon = datetime(2026, 11, 5, 12, 59, 50, tzinfo=_tz())
+        self.assertAlmostEqual(ms_until_session_change(before_afternoon), 10_000, delta=1)
+        # 低频等待可能正好在 12:59:59.6 醒来：400ms 的边界不能被跳过
+        just_before = datetime(2026, 11, 5, 12, 59, 59, 600000, tzinfo=_tz())
+        self.assertAlmostEqual(ms_until_session_change(just_before), 400, delta=1)
+        exact = datetime(2026, 11, 5, 13, 0, 0, tzinfo=_tz())
+        self.assertEqual(ms_until_session_change(exact), 0)
+
+    def test_weekend_skips_to_monday(self):
+        friday_evening = datetime(2026, 11, 6, 16, 0, 0, tzinfo=_tz())
+        # 周五 16:00 → 周一 09:15，共 65 小时 15 分
+        self.assertAlmostEqual(
+            ms_until_session_change(friday_evening), (65 * 60 + 15) * 60_000, delta=1
+        )
 
 
 class LiveQuotesTests(unittest.TestCase):

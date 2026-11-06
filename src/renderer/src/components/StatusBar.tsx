@@ -129,7 +129,7 @@ export function StatusBar(props: {
         {(current) => (
           <span class="statusbar__text num">
             行情{' '}
-            {current().updateTime !== undefined
+            {current().updateTime != null
               ? hhmmssLabel(current().updateTime)
               : timeOfDay(current().time)}{' '}
             · {relativeFrom(lastUpdateAt() || Date.now(), clockNow())}
