@@ -1,24 +1,33 @@
 # pythontdx
 
-**只做 A 股、只接通达信行情源**的跨平台行情终端。Electron 桌面端与浏览器 Web 端共用
-一套 SolidJS 界面，Python 负责通达信协议、实时行情、离线数据与面向机器学习的数据湖。
+**只做 A 股、只接通达信行情源**的跨平台行情终端 —— 从 0 手写通达信 7709 / MAC / 7615 协议；
+Electron + SolidJS 双前端，Python 负责行情、离线数据与面向机器学习的数据湖。
 
-`Electron` · `Vite` · `SolidJS` · `TypeScript` · `Python` · `7709 / MAC / 7615`
+![pythontdx 主界面：指数 K 线、成交量、五档盘口](docs/assets/pythontdx-1.6-overview.png)
 
-**v1.6.1** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64
+[**⬇ 下载 v1.6.1**](https://github.com/riverzhou/pythontdx/releases/latest) ·
+[功能](#功能) · [快速开始](#快速开始) · [截图](#截图) · [文档](#文档)
 
-`npm run check` **372 TS（370 通过 / 2 skipped）+ 336 Python（335 通过 / 1 skipped）**
+**v1.6.1** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64 ·
+[![check](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml/badge.svg)](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml)
+`npm run check` 372 TS + 336 Python 全绿
 
-[GitHub Releases](https://github.com/riverzhou/pythontdx/releases) ·
-[前后端边界](docs/23-前后端边界与双端一致性.md) ·
-[协议总表](docs/21-通达信协议总表.md) ·
-[MAC 策略](docs/19-MAC协议与数据源策略.md)
+`Electron` · `Vite` · `SolidJS` · `TypeScript` · `Python` · `Parquet / DuckDB` · `7709 / MAC / 7615`
+
+> **English**：An A-share (China) stock market terminal built from scratch on the Tongdaxin
+> (TDX) protocol — Electron + SolidJS + Python. Real-time quotes, minute/K-line charts,
+> five-level order book, tick tape, F10 fundamentals, screening/alerts and a local
+> Parquet data lake. Docs are Chinese-first; the code and commit history are bilingual.
+> [Download the latest release →](https://github.com/riverzhou/pythontdx/releases/latest)
+
+**关键词**：通达信 · TDX · A 股行情 · 实时行情 · 分时 · K 线 · 五档盘口 · 逐笔 ·
+选股预警 · 离线数据湖 · Electron · SolidJS · Python · 跨平台
+
+> 如果它帮你省了点时间，**点个 Star ⭐** 能让更多搜「通达信 行情」的人找到它。
 
 ---
 
 ## 一眼看懂
-
-![pythontdx 主界面](docs/assets/pythontdx-1.6-overview.png)
 
 - **实时行情**：1 秒刷新；分时、五日、K 线、九宫格同一节奏；
 - **数据工具**：24 个离线数据集，日 K 与 1 分钟 K 独立勾选，多进程 × 多线程 × 多服务器并行；
@@ -26,6 +35,16 @@
 - **本地数据湖**：Parquet/ZSTD + DuckDB、JSONL.gz、`trade_date=` 分区、manifest + SHA256；
 - **桌面 + Web**：同一套渲染层；桌面走 IPC，Web 走 HTTP/SSE/WebSocket；
   行情缓存、K 线增量、涨跌家数统计只有 Python 一份实现。
+
+### 它做什么、不做什么
+
+- **做**：A 股行情与数据分析的完整闭环 —— 实时行情、多周期图表、五档盘口、逐笔成交、
+  F10 资料、选股与预警、公式回测、离线数据湖、桌面与 Web 双端；
+- **数据源只做通达信**：7709 主站 / MAC / 7615 资料 / 官方文件下载，
+  不拿腾讯、新浪、东财、AKShare 之类做兜底；
+- **不做**：港股 / 美股 / 期货 / 期权、7727 扩展行情、Level-2 付费行情、交易下单；
+- **定位**：学习项目，协议与字段结论都要求有报文证据（`docs/08`），
+  代码质量与可读性优先于功能数量。
 
 ### Web 端：同一套界面、同一份数据
 
@@ -295,7 +314,20 @@ K 线/分时/逐笔/盘口一致（截图采集于 1.6.0）。
 
 ## 快速开始
 
-### 依赖
+### 直接用（推荐，不必装 Python）
+
+从 [Releases](https://github.com/riverzhou/pythontdx/releases/latest) 下载对应平台的产物：
+
+| 平台 | 文件 |
+| --- | --- |
+| Windows x64 | `pythontdx-<版本>-setup.exe`（安装版）/ `-portable.exe`（单文件）/ `-win-x64.zip`（绿色） |
+| macOS arm64 | `pythontdx-<版本>-arm64.dmg` |
+| Linux x64 | `pythontdx-<版本>.AppImage` / `pythontdx_<版本>_amd64.deb` |
+
+打包版自带 Python sidecar，用户不需要安装 Python；Windows 包是自签名，
+只保证完整性，SmartScreen 仍会提示「未知发布者」。
+
+### 从源码：依赖
 
 - Node.js ≥ 20.19（实测 24.x）
 - Python ≥ 3.10（开发/后端；打包版用户不需要）
@@ -381,6 +413,60 @@ docs/            是什么、为什么、协议与发布记录
 | [RELEASE_NOTES-1.6.1.md](RELEASE_NOTES-1.6.1.md) | 1.6.1 发布说明（非交易日时间归属修复） |
 | [RELEASE_NOTES-1.6.0.md](RELEASE_NOTES-1.6.0.md) | 1.6.0 发布说明 |
 | [RELEASE_NOTES-1.5.0.md](RELEASE_NOTES-1.5.0.md) | 1.5.0 发布说明 |
+
+---
+
+## English
+
+**pythontdx** is a cross-platform A-share (China) market terminal written from scratch.
+It speaks the Tongdaxin (TDX) protocol directly — primary quote servers on TCP 7709,
+MAC market data, the 7615 fundamentals gateway, plus official file downloads — and keeps
+everything local as Parquet (ZSTD) with manifests and SHA-256 checksums.
+
+- **Two front ends, one UI**: Electron desktop (IPC/stdio sidecar) and a browser client
+  (HTTP/SSE/WebSocket) share the same SolidJS renderer and design tokens.
+- **One data implementation**: all quote, cache and incremental logic lives in Python
+  (`python/tdx_bridge.py`); TypeScript only renders and transports.
+- **A data lake meant for ML**: immutable raw messages, normalized Parquet,
+  `trade_date` partitions, point-in-time F10 snapshots, delisted/suspended symbols kept.
+- **Scope on purpose**: A-shares only — no HK/US/futures/options, no Level-2, no order
+  routing, and no third-party data vendors as fallback.
+- **Status**: 1.6.1 · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64 ·
+  `npm run check` green (372 TS + 336 Python tests).
+
+Download: [Releases](https://github.com/riverzhou/pythontdx/releases/latest).
+Run from source: `npm install && python -m pip install -r requirements.txt && npm run dev`.
+Documentation is currently Chinese-first — start at [docs/01](docs/01-快速开始.md) or
+[docs/02](docs/02-架构设计.md).
+
+---
+
+## 常见问题
+
+**Q：需要自己安装 Python 吗？**
+不需要。Releases 里的安装包 / 便携版自带 Python sidecar（用 Nuitka 打成的单文件）；
+只有从源码开发、或单独跑离线同步脚本时才需要 Python 3.10+。
+
+**Q：数据从哪来？能商用吗？**
+全部走通达信公开行情服务：7709 主站、MAC 行情、7615 资料网关、官方文件下载
+（`vipdoc` 等），与官方客户端同源；不做登录、不做交易、不碰付费 Level-2。
+本项目是 GPL-3.0 的个人学习项目，**行情数据的授权与使用风险请自行判断**，
+不构成投资建议。
+
+**Q：和 mootdx / pytdx 这类库有什么区别？**
+那些偏「取数据的库」；这个项目是端到端的行情终端 —— 协议层、Python 数据层、
+桌面 / Web 界面、离线数据湖一起做，取舍不同，按需选择。
+
+**Q：支持港股 / 美股 / 期货吗？**
+不做，只做沪深京 A 股；通达信 7727 扩展行情（EX）也不做。
+
+**Q：能直接拿来跑策略回测吗？**
+能取数据，但没有撮合级回测引擎。仓库提供 Parquet + DuckDB 离线数据、公式与简易回测，
+数据可直接喂给 pandas 或你自己的框架（面向 ML 的长期目标见 `docs/00-项目章程.md`）。
+
+**Q：为什么要做成「像通达信」的样子？**
+目标是对齐官方客户端的行情、分析、选股、资料能力（`docs/09`），
+布局与术语刻意贴近，降低从官方客户端迁移的成本。
 
 ---
 

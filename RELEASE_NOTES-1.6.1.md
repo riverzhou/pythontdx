@@ -5,6 +5,17 @@
 - 平台：Windows x64、Linux x64、macOS arm64
 - 定位：非交易日（周末 / 节假日 / 凌晨）的时间归属修复
 
+![pythontdx 主界面](https://raw.githubusercontent.com/riverzhou/pythontdx/master/docs/assets/pythontdx-1.6-overview.png)
+
+> **English** — 1.6.1 fixes the non-trading-day basis. On weekends, holidays and before
+> the open, TDX's intraday endpoint and quotes belong to the **previous** trading day,
+> but 1.6.0 labeled them with the wall-clock date. That made the minute chart use the
+> wrong previous close (`sz301218` showed 99.86 instead of 86.60) and appended a phantom
+> `2026-11-14` daily bar on a Saturday. `fetchedAt` is now written in `+08:00` so UTC CI
+> runners no longer mis-date cached K-line manifests.
+> Assets: Windows `setup` / `portable` / `win-x64.zip` (+ sha256, self-signed cert),
+> macOS arm64 `dmg`, Linux `AppImage` / `deb`.
+
 ## 这个版本修了什么
 
 1.6.0 里，「今天」被当成了「交易日」。周末和节假日打开软件时，

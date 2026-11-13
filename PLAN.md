@@ -78,6 +78,36 @@ updateTime 作游标，无变化返回 0 条；客户端已缓存上一帧、按
   日线末三根 `11-11 94.97 / 11-12 86.60 / 11-13 99.86`。修复前同一份数据会算成 99.86。
 - 发布：1.6.1 tag 触发三平台 Release；本机构建见 `docs/07` 第四十九节。
 
+### 2026-11-14 推广优化：仓库门面与可发现性
+
+用户反馈 GitHub 访问热度下降。先看数据（GitHub Traffic，近 14 天）：
+**314 次浏览 / 20 个独立访客**，其中 11-02（发版日）114 次，11-07 起基本为 0；
+clone 却有 960 次 / 265 独立 —— 说明「有人按链接来下载」，但**搜不到**。
+根因是门面几乎是空的：description 只有 `python tdx`、Topics **0 个**、homepage 为空。
+
+- **仓库元数据**（API 改，已生效）：
+  - description → 双语定位 + 关键词（A 股行情终端 / 通达信 TDX 7709·MAC·7615 /
+    Electron + SolidJS + Python / 实时行情 · K 线 · 离线 Parquet 数据湖）；
+  - Topics 20 个：`a-share` `china-stocks` `stock-market` `tdx` `tongdaxin`
+    `tdx-protocol` `market-data` `stock-data` `real-time-data` `kline`
+    `candlestick-chart` `quant` `electron` `solidjs` `typescript` `python`
+    `parquet` `data-lake` `desktop-app` `cross-platform`；
+  - homepage → `releases/latest`（搜索结果里直接变成下载入口）；
+- **README 首屏**：重排为「标题 → 一句话定位 → 真实截图 → 下载入口」，
+  截图提到第一屏；新增「它做什么、不做什么」（把非目标写死，避免误点）、
+  英文摘要、关键词行、Star 提示；快速开始加「直接用（不必装 Python）」产物表；
+- **社交预览**：新增 `scripts/social-preview.py` + `npm run social`，生成
+  `docs/assets/pythontdx-social-preview.png`（1280×640，215KB）。
+  GitHub 没有设置社交预览的 API，**需要手动上传**（`Settings → Social preview`），
+  步骤写进 `docs/07` 第 ⑨ 步；
+- **发布页**：`RELEASE_NOTES-1.6.1.md` 加英文摘要与主图，
+  用 `gh release edit` 刷新已发布的 Release 页；
+- **待观察**（不能假装已经涨了）：Topics/description 进搜索索引需要时间；
+  7 天后用 `gh api repos/riverzhou/pythontdx/traffic/views` 对比基线 314/20，
+  再看 `search/repositories?q=topic:tdx` 是否收录。
+- **未做/建议后续**：向 awesome-quant 等清单提 PR（属外部仓库动作，需单独确认）；
+  社交预览图上传、置顶仓库仍需人工在网页上点。
+
 
 ### P0 · 2026-11-06：TDX 交易日历与部署模式（1.6.0）
 

@@ -29,6 +29,7 @@
     "audit:data": "node scripts/python.mjs audit",
     "build:python": "node scripts/python.mjs build",
     "icon": "node scripts/generate-icon.mjs",
+    "social": "node scripts/python.mjs social",
     "shot": "npm run build && node scripts/screenshot.mjs",
     "check": "npm run typecheck && npm run lint && npm run test && npm run test:python",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,html}\" \"scripts/**/*.mjs\" \"docs/**/*.md\" \"*.{json,md,yml}\" \".vscode/*.json\"",
