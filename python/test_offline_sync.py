@@ -211,7 +211,16 @@ class TestPlanAndShard(unittest.TestCase):
                 write_bars(target, "sh600000", [
                     {"date": "2026-11-04", "open": 1.0, "close": 1.0, "high": 1.0, "low": 1.0, "volume": 1.0, "amount": 1.0}
                 ])
-                write_kline_manifest(target, {"code": "sh600000", "period": "day", "complete": True})
+                write_kline_manifest(
+                    target,
+                    {
+                        "code": "sh600000",
+                        "period": "day",
+                        "complete": True,
+                        # 与 _write_kline_cache 一致：epoch 毫秒，不能按本地日期截断
+                        "fetchedAt": int(offline_sync._shanghai_now().timestamp() * 1000),
+                    },
+                )
                 options_skip = offline_sync.normalize_options(
                     {
                         "datasets": ["kline", "finance", "category"],
@@ -225,6 +234,17 @@ class TestPlanAndShard(unittest.TestCase):
                     options_skip, ["sh600000", "sz000001"], root
                 )
                 self.assertEqual(plan2["skipped"], 1)
+
+    def test_manifest_day_normalizes_epoch_and_iso(self):
+        moment = offline_sync._shanghai_now()
+        day = moment.strftime("%Y-%m-%d")
+        self.assertEqual(
+            offline_sync._manifest_day(int(moment.timestamp() * 1000)), day
+        )
+        self.assertEqual(
+            offline_sync._manifest_day(moment.astimezone(timezone.utc).isoformat()), day
+        )
+        self.assertEqual(offline_sync._manifest_day("2026-11-04"), "2026-11-04")
 
     def test_kline_1m_missing_manifest_is_repaired(self):
         with tempfile.TemporaryDirectory() as directory:
