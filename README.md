@@ -8,9 +8,9 @@ Electron + SolidJS 双前端，Python 负责行情、离线数据与面向机器
 [**⬇ 下载 v1.6.1**](https://github.com/riverzhou/pythontdx/releases/latest) ·
 [功能](#功能) · [快速开始](#快速开始) · [截图](#截图) · [文档](#文档)
 
-**v1.6.1** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64 ·
+**v1.6.1** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64  
 [![check](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml/badge.svg)](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml)
-`npm run check` 372 TS + 336 Python 全绿
+· `npm run check` 372 TS + 336 Python 全绿
 
 `Electron` · `Vite` · `SolidJS` · `TypeScript` · `Python` · `Parquet / DuckDB` · `7709 / MAC / 7615`
 
@@ -465,7 +465,8 @@ Documentation is currently Chinese-first — start at [docs/01](docs/01-快速�
 数据可直接喂给 pandas 或你自己的框架（面向 ML 的长期目标见 `docs/00-项目章程.md`）。
 
 **Q：为什么要做成「像通达信」的样子？**
-目标是对齐官方客户端的行情、分析、选股、资料能力（`docs/09`），
+目标是对齐官方客户端的行情、分析、选股、资料能力（见
+[docs/09-官方客户端功能清单](docs/09-官方客户端功能清单.md)），
 布局与术语刻意贴近，降低从官方客户端迁移的成本。
 
 ---
