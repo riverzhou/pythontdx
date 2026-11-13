@@ -5,9 +5,9 @@
 
 `Electron` · `Vite` · `SolidJS` · `TypeScript` · `Python` · `7709 / MAC / 7615`
 
-**v1.6.0** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64
+**v1.6.1** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64
 
-`npm run check` **369 TS（367 通过 / 2 skipped）+ 331 Python（330 通过 / 1 skipped）**
+`npm run check` **372 TS（370 通过 / 2 skipped）+ 336 Python（335 通过 / 1 skipped）**
 
 [GitHub Releases](https://github.com/riverzhou/pythontdx/releases) ·
 [前后端边界](docs/23-前后端边界与双端一致性.md) ·
@@ -34,6 +34,16 @@
 浏览器打开 `python/tdx_server.py --web-dir out/web` 的同一端口即可使用；
 2026-11-06 验收时桌面与 Web 同时显示 `sh000001` 3647.90、涨 911/跌 4548，
 K 线/分时/逐笔/盘口一致（截图采集于 1.6.0）。
+
+## 1.6.1 修复：非交易日的时间归属
+
+- **分时基准**：周末/节假日/凌晨时 `0x0537` 是上一交易日的数据，现已按
+  `shanghai_clock` 的 session 取「日线最后一根」为交易日、昨收取再往前一根；
+- **日 K 假 bar**：实时报价只在开盘后（含收盘后）补当天 K 线，
+  周末不再造出不存在的交易日；
+- **离线 `fetchedAt`**：统一按 `+08:00` 写，UTC 环境下不再把缓存判成前一天。
+
+细节见 [RELEASE_NOTES-1.6.1.md](RELEASE_NOTES-1.6.1.md)。
 
 ## 1.6.0 重点：TDX 交易日历 + 部署模式收口
 
@@ -368,6 +378,7 @@ docs/            是什么、为什么、协议与发布记录
 | [docs/22-前端设计与开发方案](docs/22-前端设计与开发方案.md) | 界面结构、设计令牌、图表、状态 |
 | [docs/23-前后端边界与双端一致性](docs/23-前后端边界与双端一致性.md) | TS/Python 边界、映射、核对表 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更 |
+| [RELEASE_NOTES-1.6.1.md](RELEASE_NOTES-1.6.1.md) | 1.6.1 发布说明（非交易日时间归属修复） |
 | [RELEASE_NOTES-1.6.0.md](RELEASE_NOTES-1.6.0.md) | 1.6.0 发布说明 |
 | [RELEASE_NOTES-1.5.0.md](RELEASE_NOTES-1.5.0.md) | 1.5.0 发布说明 |
 

@@ -15,13 +15,13 @@
 
 | 项目          | 值                                                                                                                                                                                                                                                                                                                                  |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 版本          | `1.6.0`（准备发布；功能矩阵 334 ✅ / 0 🟡 / 0 ⬜ / 6 ⛔，数据边界另见 docs/12）                                                                                                                                                                                                                                                        |
-| 最近提交      | 2026-11-06：**TDX 交易日历**：内置 TDX 官方 `Except2025/2026.zip` 快照 + MAC 0x120F 当前交易日，新增 `market_status`/`/api/market_status`；Electron 与 Web 明确二选一部署；**1.5.0**：合并社区 PR #1（收盘降频、涨跌家数缓存、F10 解耦行情锁），审核后修复 `updateTime` null、Windows 403 断连、时段边界盲区、取消订阅空转、实时 K 线每秒落盘；**架构重整**：行情/分时/K 线增量/涨跌家数缓存全部下沉 Python，TS 只做展示与传输；新增 `PRINCIPLES.md` A2/A8 与 `docs/23`；**1.4.0 基线**：离线数据 24 数据集并行同步、日 K 官方 `.day`、1m 100 日、Parquet staging、任务续跑 |
-| 健康度        | `npm run check` 全绿（372 TS；**335 Python**，1 skipped；本机 macOS arm64）；新增 TDX 日历/0x120F/节假日/部署边界回归 + 非交易日时间归属回归；`audit:data` 39/39 |
+| 版本          | `1.6.1`（已发布；功能矩阵 334 ✅ / 0 🟡 / 0 ⬜ / 6 ⛔，数据边界另见 docs/12）                                                                                                                                                                                                                                                        |
+| 最近提交      | 2026-11-14：合并社区 PR #2（`fix/non-trading-day-basis`）并发布 **1.6.1**——分时按 session 取上一交易日基准、日 K 不再造周末假 bar、`fetchedAt` 统一上海时区；**1.6.0**（2026-11-06）：**TDX 交易日历**：内置 TDX 官方 `Except2025/2026.zip` 快照 + MAC 0x120F 当前交易日，新增 `market_status`/`/api/market_status`；Electron 与 Web 明确二选一部署；**1.5.0**：合并社区 PR #1（收盘降频、涨跌家数缓存、F10 解耦行情锁），审核后修复 `updateTime` null、Windows 403 断连、时段边界盲区、取消订阅空转、实时 K 线每秒落盘；**架构重整**：行情/分时/K 线增量/涨跌家数缓存全部下沉 Python，TS 只做展示与传输；新增 `PRINCIPLES.md` A2/A8 与 `docs/23`；**1.4.0 基线**：离线数据 24 数据集并行同步、日 K 官方 `.day`、1m 100 日、Parquet staging、任务续跑 |
+| 健康度        | `npm run check` 全绿（372 TS；**336 Python**，1 skipped；本机 Windows x64，PR 作者 macOS arm64 同绿）；新增 TDX 日历/0x120F/节假日/部署边界回归 + 非交易日时间归属回归；`audit:data` 39/39 |
 | 数据能力      | 7709 29 命令、MAC 15 条 A 股相关、7615 51 个入口；新增 `lake/top_board`、`lake/unusual`、`lake/volume_profile`；按代码/按业务 key 分片归档 11 类，修复「同一天只存第一只」 |
 | 目标          | 桌面 + Web 双前端；A 股协议全覆盖；实时 + 离线 + 面向 ML 的数据湖（`docs/00`）                                                                                                                                                                                                                                                      |
 | 数据源        | 通达信 7709 + MAC + 7615 + 文件下载/本地文件；7727/EX 不做                                                                                                                                                                                                                                                                          |
-| 分发          | `v1.6.0`：Windows 本机构建 setup/portable/zip；tag 触发 GitHub Actions 构建 Linux/Windows/macOS 三平台 Release；GitLab/GitHub 同步推送 |
+| 分发          | `v1.6.1`：Windows 本机构建 setup/portable/zip；tag 触发 GitHub Actions 构建 Linux/Windows/macOS 三平台 Release；GitLab/GitHub 同步推送（1.6.0 同流程） |
 | 平台验证      | 代码跨 Windows/Linux/macOS；Linux、Windows x64、macOS arm64 已实机打包验收；macOS 仅支持 Apple Silicon（2026-11-02 决定不支持 Intel）                                                                                                                                                                                               |
 | 构建/测试环境 | Windows 10 22H2 x64 · macOS 27.2 arm64 · Ubuntu 26.04.1 x64；原生编译，不做交叉编译；0.14.4 Windows 安装版 K 线 353ms / 逐笔 209ms（自签名），macOS 真首次 10,333ms、二次 365ms                                                                                                                                                     |
 
@@ -58,7 +58,7 @@ updateTime 作游标，无变化返回 0 条；客户端已缓存上一帧、按
 
 ## 二、进行中与下一阶段
 
-### 2026-11-14 修复：非交易日的时间归属（2 处）
+### 2026-11-14 修复并发布：非交易日的时间归属（2 处，1.6.1）
 
 周末/节假日/凌晨时，`0x0537` 与实时报价属于**上一交易日**，但代码按墙钟日期处理，
 导致两处错误（用户 2026-11-14 周六在 Web 端发现）：
@@ -68,10 +68,15 @@ updateTime 作游标，无变化返回 0 条；客户端已缓存上一帧、按
   昨收从 99.86 修正为 86.60（周五分时的正确基准），0% 轴与 tooltip 涨跌幅一致。
 - **日 K 假 bar**：`applyLiveQuoteToKline` 只在开盘后（含收盘后）允许补当天 K 线；
   周末/节假日/凌晨只更新最后一根，不再造出 `2026-11-14` 这种不存在的交易日。
-- 测试：TS +3（`realtime.test.ts`）、Python +4（`test_tdx.py`）；
-  `npm run check` → 372 TS + 335 Python（1 skipped）全绿。
-- 待人工验证：重启后端后在周末/节假日复看分时基准与日 K 最后一根；
-  本次只跑了单测，未重启 8766 的旧进程。
+- **离线 `fetchedAt`**：`kline_manifest` 改按 `+08:00` 写，`offline_sync`
+  新增 `_manifest_day()` 兼容 epoch 毫秒/带时区 ISO，UTC runner 不再判错日期。
+- 测试：TS +3（`realtime.test.ts`）、Python +5（`test_tdx.py` + `test_offline_sync.py`）；
+  `npm run check` → 372 TS + 336 Python（1 skipped）全绿。
+- 人工验证（2026-11-14 06:12，Windows x64 本机，真实 7709）：
+  `market_status` → `today=2026-11-14 / lastTradingDay=2026-11-13 / weekend`；
+  `minute sz301218` → `date=2026-11-13 / prevClose=86.60 / 240 点`（末点 15:00 = 99.86）；
+  日线末三根 `11-11 94.97 / 11-12 86.60 / 11-13 99.86`。修复前同一份数据会算成 99.86。
+- 发布：1.6.1 tag 触发三平台 Release；本机构建见 `docs/07` 第四十九节。
 
 
 ### P0 · 2026-11-06：TDX 交易日历与部署模式（1.6.0）

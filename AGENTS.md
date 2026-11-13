@@ -105,8 +105,8 @@
 ```bash
 npm run dev                 # 开发模式（主进程重启 + 渲染层热更新 + Python 桥接）
 npm run check               # 类型 + Lint + TS 测试 + Python 测试，一条命令
-npm run test                # 只跑 TS 测试（369 个用例）
-npm run test:python         # 只跑 Python 协议/HTTP 测试（331 个用例）
+npm run test                # 只跑 TS 测试（372 个用例）
+npm run test:python         # 只跑 Python 协议/HTTP 测试（336 个用例）
 npm run audit:data          # 数据覆盖自检（39 项，会触发自动归档；清单见 docs/12）
 npm run build:python        # Nuitka 打行情桥接单文件（打包前必跑）
 npm run shot                # 构建并截图到 screenshots/，用来肉眼验收界面
@@ -129,7 +129,7 @@ npm run build:mac:all       # 散装 .app + dmg（每次版本更新后的验证
 也可用 `PYTHONTDX_PYTHON` 指定）。打包后的 exe 自带桥接程序，用户不需要 Python。
 打包前先 `python3 -m pip install -r requirements.txt`（含 pyarrow/duckdb/Nuitka/patchelf；Linux）。
 
-**v1.6.0**：只读 HTTP API + Web 前端（`python3 python/tdx_server.py`、`npm run dev:web`）；
+**v1.6.0 起**：只读 HTTP API + Web 前端（`python3 python/tdx_server.py`、`npm run dev:web`）；
 `--web-dir out/web` 可单端口托管；Web 端自选/设置/预警/公式/持仓写 localStorage，行情仍只读；SSE + WebSocket 已接；独立窗口不可用。
 桌面走 stdio sidecar，Web 走 HTTP/SSE/WS，但行情缓存/K 线增量/涨跌家数只有 Python 一份实现。
 
@@ -181,7 +181,7 @@ docs/            说明文档（是什么、为什么）
 
 ## 五、当前阶段
 
-**v1.6.0：TDX 交易日历 + Electron/Web 二选一部署。**
+**v1.6.1：非交易日时间归属修复（TDX 交易日历 + Electron/Web 二选一部署）。**
 部署模式：**Electron 桌面与 Web 二选一，不同时使用**；同机只允许一个 Python 后端持有 7709 连接（`PRINCIPLES.md` A6）。
 行情、分时、五日、K 线增量、涨跌家数缓存全部只有 Python 一份实现；
 桌面（IPC/stdio）与 Web（HTTP/SSE/WS）只是同一批 `Bridge` 方法的两种传输。
@@ -189,7 +189,9 @@ docs/            说明文档（是什么、为什么）
 **A8** Web/Electron 同源（同一命令、同一响应、同一测试）。
 逐项映射与核对表见 `docs/23-前后端边界与双端一致性.md`。
 
-健康度 `npm run check` 全绿（369 个 TS 测试 + 331 个 Python 测试，各 2/1 skipped）。
+健康度 `npm run check` 全绿（372 个 TS 测试 + 336 个 Python 测试，各 2/1 skipped）。
+1.6.1 修掉：周末/节假日/凌晨把墙钟日期当交易日——分时昨收基准取错、
+日 K 凭空补出假 bar、离线 `fetchedAt` 按本机时区判日期。
 1.6.0 新增：TDX 官方节假日快照 + 0x120F 交易日状态、`market_status`、
 `holiday` 会话；桌面/Web/离线窗口共用同一份日历。
 1.5.0 修掉：`updateTime` JSON null 导致状态栏显示「—」、Windows 跨源 403 断连、

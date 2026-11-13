@@ -10,6 +10,42 @@ pythontdx 的所有重要变更都记录在这里。
 
 ---
 
+## [1.6.1] - 2026-11-14
+
+### 修复
+
+- **非交易日的时间归属**（社区 PR #2 `fix/non-trading-day-basis`；
+  用户 2026-11-14 周六在 Web 端发现）：
+  - **分时基准**：`Bridge.minute()` 不再用「日线最后一根 == 今天」判断，
+    改为按 `shanghai_clock` 的 session 决定分时属于今天还是上一交易日。
+    周末/节假日/凌晨取「日线最后一根」为交易日、昨收取再往前一根；
+    `sz301218` 周六昨收从 99.86 修正为 86.60，0% 轴与 tooltip 涨跌幅一致。
+  - **日 K 假 bar**：`applyLiveQuoteToKline()` 新增 `allowsNewBar()`，
+    只有开盘后（含收盘后 `>=15:00`）才允许补当天 K 线；周末/节假日/凌晨
+    只更新最后一根，不再造出 `2026-11-14` 这种不存在的交易日。
+  - **离线同步 `fetchedAt`**：`kline_manifest` 统一按 `+08:00` 写；
+    新增 `_manifest_day()` 兼容 epoch 毫秒与带时区 ISO，避免 CI 的 UTC
+    runner 在 00:00–08:00 把缓存判成前一天。
+
+### 验证
+
+- `npm run check` exit 0：**372 TS**（370 通过 / 2 skipped）+ **336 Python**
+  （335 通过 / 1 skipped）。
+- 真实 7709 实测（2026-11-14 周六 06:12，Windows x64）：
+  `market_status` → `today=2026-11-14 / lastTradingDay=2026-11-13 /
+  session=weekend`；`minute sz301218` → `date=2026-11-13 /
+  prevClose=86.60 / 240 点`，末点 `15:00 = 99.86`；日线末三根
+  `11-11 94.97 / 11-12 86.60 / 11-13 99.86`。修复前同一份数据把昨收算成 99.86。
+- 新增回归：`test_tdx.TestMinuteTradingDate` 4 例 + `_manifest_day` 1 例；
+  `realtime.test.ts` 3 例（周末不补 bar / 收盘后可补 / 开盘前不补）。
+- Windows 本机构建 `release/1.6.1/` 与实机启动验收见 `docs/07` 第四十九节。
+
+### 工程
+
+- 版本 `1.6.1`；`package.json` / `package-lock.json` 同步。
+
+---
+
 ## [1.6.0] - 2026-11-06
 
 ### 新增
