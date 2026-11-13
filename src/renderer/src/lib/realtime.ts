@@ -136,6 +136,46 @@ function pad(value: number): string {
 }
 
 /**
+ * 当前时段是否允许用报价补出「今天」的新 K 线。
+ *
+ * 收盘后（>=15:00）仍允许：官方日线可能还没生成；
+ * 凌晨、周末、节假日、开盘前不允许：此时报价属于上一交易日，硬补会造出
+ * 一根日期不存在、内容重复的假 bar（见 2026-11-14 周六 sz301218）。
+ */
+function allowsNewBar(clock: ReturnType<typeof shanghaiClock>): boolean {
+  if (clock.session === 'weekend' || clock.session === 'holiday') return false
+  if (clock.session === 'closed') return clock.time >= '15:00:00'
+  return true
+}
+
+function patchBar(
+  bar: KLineBar,
+  price: number,
+  quote: Quote,
+  period: KLinePeriod,
+  volume?: number
+): KLineBar {
+  // 日线的 high/low 就是全天累计值，可以直接用报价；分钟线不能用，
+  // 因为 quote.high/low 是全天最高/最低，不是这一根 K 线的。
+  const high =
+    period === 'day'
+      ? Math.max(bar.high, price, quote.high > 0 ? quote.high : price)
+      : Math.max(bar.high, price)
+  const low =
+    period === 'day'
+      ? Math.min(bar.low, price, quote.low > 0 ? quote.low : price)
+      : Math.min(bar.low, price)
+  return {
+    ...bar,
+    close: price,
+    high,
+    low,
+    ...(volume === undefined ? {} : { volume }),
+    ...(period === 'day' ? { amount: quote.amount } : {})
+  }
+}
+
+/**
  * 用最新报价补 K 线最后一根（或开盘第一秒的新 K 线）。
  *
  * 只改 close/high/low，日线额外用累计成交量；分钟线的成交量仍等官方 tail，
@@ -144,12 +184,22 @@ function pad(value: number): string {
 export function applyLiveQuoteToKline(
   series: KLineSeries,
   quote: Quote | undefined,
-  period: KLinePeriod
+  period: KLinePeriod,
+  now: Date = new Date()
 ): KLineSeries {
   if (!quote || !(quote.price > 0)) return series
   const price = quote.price
   const label = liveBarLabel(period, quote)
   const bars = series.bars
+
+  if (!allowsNewBar(shanghaiClock(now))) {
+    // 非交易时段只更新最后一根已有 K 线；没有历史时不要凭空造一根。
+    if (bars.length === 0) return series
+    const next = bars.slice(0, -1)
+    next.push(patchBar(bars[bars.length - 1], price, quote, period))
+    return { ...series, bars: next }
+  }
+
   if (bars.length === 0) {
     return {
       ...series,
@@ -168,32 +218,13 @@ export function applyLiveQuoteToKline(
   }
 
   const last = bars[bars.length - 1]
-  const patch = (bar: KLineBar, volume?: number): KLineBar => {
-    // 日线的 high/low 就是全天累计值，可以直接用报价；分钟线不能用，
-    // 因为 quote.high/low 是全天最高/最低，不是这一根 K 线的。
-    const high =
-      period === 'day' ? Math.max(bar.high, price, quote.high > 0 ? quote.high : price) : Math.max(bar.high, price)
-    const low =
-      period === 'day' ? Math.min(bar.low, price, quote.low > 0 ? quote.low : price) : Math.min(bar.low, price)
-    return {
-      ...bar,
-      close: price,
-      high,
-      low,
-      ...(volume === undefined ? {} : { volume }),
-      ...(period === 'day' ? { amount: quote.amount } : {})
-    }
-  }
+  const patch = (bar: KLineBar, volume?: number): KLineBar =>
+    patchBar(bar, price, quote, period, volume)
 
   const canAppend = period === 'day' || isIntradayPeriod(period)
   if (last.date === label) {
     const next = bars.slice(0, -1)
-    next.push(
-        patch(
-          last,
-          period === 'day' ? quote.volume : undefined
-        )
-      )
+    next.push(patch(last, period === 'day' ? quote.volume : undefined))
     return { ...series, bars: next }
   }
 

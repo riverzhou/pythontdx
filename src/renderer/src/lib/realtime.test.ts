@@ -136,13 +136,16 @@ describe('liveBarLabel', () => {
 })
 
 describe('applyLiveQuoteToKline', () => {
+  /** 2026-11-03 是周二，09:30:05 属于交易时段 */
+  const TRADING_NOW = new Date('2026-11-03T09:30:05+08:00')
+
   it('日线最后一根会被最新价更新', () => {
     const source: KLineSeries = {
       code: 'sh600519',
       period: 'day',
       bars: [{ date: '2026-11-03', open: 1450, high: 1455, low: 1448, close: 1455, volume: 100 }]
     }
-    const next = applyLiveQuoteToKline(source, quote(), 'day')
+    const next = applyLiveQuoteToKline(source, quote(), 'day', TRADING_NOW)
     expect(next.bars).toHaveLength(1)
     expect(next.bars[0].close).toBe(1460)
     expect(next.bars[0].high).toBe(1462)
@@ -153,7 +156,8 @@ describe('applyLiveQuoteToKline', () => {
     const next = applyLiveQuoteToKline(
       { code: 'sh600519', period: '1m', bars: [] },
       quote(),
-      '1m'
+      '1m',
+      TRADING_NOW
     )
     expect(next.bars).toHaveLength(1)
     expect(next.bars[0].date).toBe('2026-11-03 09:30')
@@ -166,9 +170,79 @@ describe('applyLiveQuoteToKline', () => {
       period: 'week',
       bars: [{ date: '2026-10-30', open: 1, high: 2, low: 1, close: 2, volume: 1 }]
     }
-    const next = applyLiveQuoteToKline(source, quote(), 'week')
+    const next = applyLiveQuoteToKline(source, quote(), 'week', TRADING_NOW)
     expect(next.bars).toHaveLength(1)
     expect(next.bars[0].close).toBe(1460)
+  })
+
+  it('周末不凭空追加一根日线', () => {
+    // 2026-11-14 是周六；报价的 time 是本地接收时间，不能当作交易日。
+    const source: KLineSeries = {
+      code: 'sz301218',
+      period: 'day',
+      bars: [
+        { date: '2026-11-12', open: 94, high: 94.59, low: 86, close: 86.6, volume: 1 },
+        { date: '2026-11-13', open: 87.26, high: 103.92, low: 87.26, close: 99.86, volume: 1 }
+      ]
+    }
+    const next = applyLiveQuoteToKline(
+      source,
+      quote({
+        code: 'sz301218',
+        price: 99.86,
+        open: 87.26,
+        high: 103.92,
+        low: 87.26,
+        volume: 236645,
+        time: Date.parse('2026-11-14T01:40:41+08:00')
+      }),
+      'day',
+      new Date('2026-11-14T01:40:41+08:00')
+    )
+    expect(next.bars).toHaveLength(2)
+    expect(next.bars[1].date).toBe('2026-11-13')
+  })
+
+  it('交易日收盘后仍可补出当天日线', () => {
+    const source: KLineSeries = {
+      code: 'sz301218',
+      period: 'day',
+      bars: [{ date: '2026-11-12', open: 94, high: 94.59, low: 86, close: 86.6, volume: 1 }]
+    }
+    const next = applyLiveQuoteToKline(
+      source,
+      quote({
+        code: 'sz301218',
+        price: 99.86,
+        time: Date.parse('2026-11-13T20:00:00+08:00')
+      }),
+      'day',
+      new Date('2026-11-13T20:00:00+08:00')
+    )
+    expect(next.bars).toHaveLength(2)
+    expect(next.bars[1].date).toBe('2026-11-13')
+  })
+
+  it('交易日开盘前不追加当天日线', () => {
+    const source: KLineSeries = {
+      code: 'sz301218',
+      period: 'day',
+      bars: [
+        { date: '2026-11-13', open: 87.26, high: 103.92, low: 87.26, close: 99.86, volume: 1 }
+      ]
+    }
+    const next = applyLiveQuoteToKline(
+      source,
+      quote({
+        code: 'sz301218',
+        price: 99.86,
+        time: Date.parse('2026-11-16T08:30:00+08:00')
+      }),
+      'day',
+      new Date('2026-11-16T08:30:00+08:00')
+    )
+    expect(next.bars).toHaveLength(1)
+    expect(next.bars[0].date).toBe('2026-11-13')
   })
 })
 
