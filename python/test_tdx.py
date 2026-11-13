@@ -13,6 +13,7 @@ import struct
 import tempfile
 import unittest
 import zipfile
+from datetime import datetime
 from unittest.mock import patch
 from pathlib import Path
 
@@ -1129,6 +1130,77 @@ class TestTqlexFailover(unittest.TestCase):
             self.assertEqual(self.f10._tqlex_post("Test", b"{}"), {"ErrorCode": 0})
         self.assertEqual(len(opener.calls), 1)
         self.assertNotIn(bad, opener.calls[0])
+
+
+class _MinuteOnlyConnection:
+    """分时测试：不碰网络，0x0537 一律返回固定 fixture。"""
+
+    def request(self, *args, **kwargs) -> bytes:
+        return fixture("minute")
+
+
+class TestMinuteTradingDate(unittest.TestCase):
+    """周末/凌晨/盘前：0x0537 返回上一交易日的分时，昨收必须取再往前一根。"""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.calendar_path = Path(self.temp.name) / "trading_calendar.json"
+
+    def tearDown(self) -> None:
+        trading_calendar.configure(None)
+        self.temp.cleanup()
+
+    def _minute(self, daily: list[dict], now) -> dict:
+        bridge = tdx.Bridge(index_items=[SECURITIES["sh600519"]])
+        # Bridge 构造时会把日历指回真实数据目录；测试里换成临时文件。
+        trading_calendar.configure(self.calendar_path)
+        bridge._raw_daily = lambda *args, **kwargs: daily
+        bridge.conn = _MinuteOnlyConnection()
+        return bridge.minute("sh600519", now=now)
+
+    def test_weekend_uses_previous_trading_day_close(self) -> None:
+        result = self._minute(
+            [
+                {"date": "2026-11-12", "close": 86.6},
+                {"date": "2026-11-13", "close": 99.86},
+            ],
+            datetime(2026, 11, 14, 1, 40, tzinfo=tdx.SHANGHAI_TZ),
+        )
+        self.assertEqual(result["date"], "2026-11-13")
+        self.assertAlmostEqual(result["prevClose"], 86.6)
+
+    def test_before_open_uses_last_session(self) -> None:
+        result = self._minute(
+            [
+                {"date": "2026-11-11", "close": 94.97},
+                {"date": "2026-11-12", "close": 86.6},
+            ],
+            datetime(2026, 11, 13, 8, 30, tzinfo=tdx.SHANGHAI_TZ),
+        )
+        self.assertEqual(result["date"], "2026-11-12")
+        self.assertAlmostEqual(result["prevClose"], 94.97)
+
+    def test_trading_day_uses_previous_bar(self) -> None:
+        result = self._minute(
+            [
+                {"date": "2026-11-12", "close": 86.6},
+                {"date": "2026-11-13", "close": 99.86},
+            ],
+            datetime(2026, 11, 13, 10, 0, tzinfo=tdx.SHANGHAI_TZ),
+        )
+        self.assertEqual(result["date"], "2026-11-13")
+        self.assertAlmostEqual(result["prevClose"], 86.6)
+
+    def test_after_close_keeps_today(self) -> None:
+        result = self._minute(
+            [
+                {"date": "2026-11-12", "close": 86.6},
+                {"date": "2026-11-13", "close": 99.86},
+            ],
+            datetime(2026, 11, 13, 20, 0, tzinfo=tdx.SHANGHAI_TZ),
+        )
+        self.assertEqual(result["date"], "2026-11-13")
+        self.assertAlmostEqual(result["prevClose"], 86.6)
 
 
 class TestDatasetWriter(unittest.TestCase):

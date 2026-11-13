@@ -4,10 +4,13 @@ from __future__ import annotations
 import json
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from parquet_store import file_sha256
+
+# A 股按北京时间归档；CI runner 多为 UTC，fetchedAt 不能写本地时区。
+SHANGHAI = timezone(timedelta(hours=8))
 
 
 def manifest_path(data_path: Path) -> Path:
@@ -61,7 +64,7 @@ def write_kline_manifest(data_path: Path, metadata: dict | None = None) -> dict:
         "bytes": data_path.stat().st_size,
         "sha256": file_sha256(data_path),
         "fetchedAt": meta.get("fetchedAt")
-        or datetime.now().astimezone().isoformat(timespec="seconds"),
+        or datetime.now(SHANGHAI).isoformat(timespec="seconds"),
         **meta,
     }
     target = manifest_path(data_path)

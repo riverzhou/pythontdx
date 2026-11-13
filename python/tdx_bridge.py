@@ -8248,9 +8248,15 @@ class Bridge:
         )
         return parse_bars(body, kind, PERIOD_RAW["day"])
 
-    def minute(self, code: str) -> dict:
+    def minute(self, code: str, now: datetime | None = None) -> dict:
         market, symbol = parse_code(code)
-        today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        moment = now or datetime.now(SHANGHAI_TZ)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=SHANGHAI_TZ)
+        else:
+            moment = moment.astimezone(SHANGHAI_TZ)
+        today = moment.strftime("%Y-%m-%d")
+        clock, session = shanghai_clock(moment)
         cached = self.minute_daily_cache.get(code)
         if cached and cached[0] > time.time() and cached[1] == today:
             daily = cached[2]
@@ -8260,21 +8266,31 @@ class Bridge:
         last = daily[-1] if daily else None
         previous = daily[-2] if len(daily) >= 2 else None
 
-        # 09:30 第一秒时今天的日线可能还没生成：daily 最后一根是昨天。
-        # 不能拿「昨天-前天」当昨收，否则第一根分时的涨跌幅/坐标全错。
-        has_today = bool(last and last["date"] == today)
-        prev_close = (
-            previous["close"]
-            if has_today and previous
-            else (last["close"] if last else 0.0)
+        # 分时数据属于哪个交易日：开盘后是今天；周末/节假日/凌晨是日线最后一根。
+        # 后者的 0x0537 返回上一交易日的分时，昨收要取再往前一根，不能取 last.close，
+        # 否则整张分时图的 0% 基准和涨跌幅都会错（2026-11-14 周六实测）。
+        today_session = session in {"pre-open", "trading", "lunch-break"} or (
+            session == "closed" and clock >= "15:00:00"
         )
+        if today_session:
+            trade_date = today
+            if last and last["date"] == today:
+                prev_close = previous["close"] if previous else last["close"]
+            else:
+                # 09:30 第一秒时今天的日线可能还没生成：daily 最后一根是昨天。
+                prev_close = last["close"] if last else 0.0
+        else:
+            trade_date = str(last["date"]) if last else today
+            prev_close = (
+                previous["close"] if previous else (last["close"] if last else 0.0)
+            )
 
         body = self.conn.request(CMD_MINUTE, minute_data(market, symbol))
         return parse_today_minute(
             body,
             code=code,
             name=self._name(code, symbol),
-            date=today,
+            date=trade_date,
             prev_close=prev_close,
             decimal=self._decimal(code),
         )

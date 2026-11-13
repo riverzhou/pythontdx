@@ -774,6 +774,27 @@ def _today() -> str:
     return _shanghai_now().strftime("%Y-%m-%d")
 
 
+def _manifest_day(value: object) -> str:
+    """manifest 的 fetchedAt → 上海日期。
+
+    兼容两种历史写法：kline_cache 写 epoch 毫秒，旧默认写本地时区 ISO。
+    CI runner 是 UTC，直接截前 10 位会把 00:00–08:00 写下的缓存判成前一天。
+    """
+    if isinstance(value, (int, float)) and value > 0:
+        moment = datetime.fromtimestamp(float(value) / 1000, SHANGHAI)
+        return moment.strftime("%Y-%m-%d")
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return text[:10]
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(SHANGHAI)
+    return moment.strftime("%Y-%m-%d")
+
+
 def _task_key(task: dict[str, Any]) -> str:
     dataset = task["dataset"]
     parts = [dataset, str(task.get("code") or "")]
@@ -970,8 +991,7 @@ def _already_archived(task: dict[str, Any], root: Path) -> bool:
             if str(payload.get("lastDate") or "")[:10] < latest:
                 # 当天已经重试过，但官方 .day 仍是旧日期（北交所/停牌/退市）。
                 # 同一天不要无限重下；第二天 fetchedAt 不再是今天，会再试一次。
-                fetched = str(payload.get("fetchedAt") or "")[:10]
-                if fetched == _today():
+                if _manifest_day(payload.get("fetchedAt")) == _today():
                     return True
                 return False
         return target.stat().st_size > 32
