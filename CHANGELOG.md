@@ -38,7 +38,10 @@ pythontdx 的所有重要变更都记录在这里。
   `11-11 94.97 / 11-12 86.60 / 11-13 99.86`。修复前同一份数据把昨收算成 99.86。
 - 新增回归：`test_tdx.TestMinuteTradingDate` 4 例 + `_manifest_day` 1 例；
   `realtime.test.ts` 3 例（周末不补 bar / 收盘后可补 / 开盘前不补）。
-- Windows 本机构建 `release/1.6.1/` 与实机启动验收见 `docs/07` 第四十九节。
+- Windows 本机构建 `release/1.6.1/` 与实机启动验收见 `docs/07` 第四十九节；
+  tag `v1.6.1` 的 GitHub Actions run `43517135236` 三平台 success，
+  12 个资产已发布到
+  <https://github.com/riverzhou/pythontdx/releases/tag/v1.6.1>。
 
 ### 工程
 
