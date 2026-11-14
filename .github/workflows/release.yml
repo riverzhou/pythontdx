@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    # ubuntu-latest 目前仍指向 24.04（2026-11 迁移窗口内），显式固定到最新的 26.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
