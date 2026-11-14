@@ -1,6 +1,6 @@
 {
   "name": "pythontdx",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "pythontdx · 高颜值跨平台股票行情终端（Electron + Vite + SolidJS）",
   "author": "River",

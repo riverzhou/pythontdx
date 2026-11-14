@@ -146,9 +146,29 @@ async function drive(window: BrowserWindow): Promise<void> {
   // 顺序刻意和人的操作一致：点 tab → 等界面就绪 → 点住图表 → 按上下键。
   // 焦点必须放在**等就绪之后**：切 tab 会重建图表 DOM，提前聚焦的话，
   // 等数据回来时那个元素已经被换掉了，按键就没有落点。
+  /*
+   * 每一步先等选择器出现再点：菜单/弹窗是点击后才渲染的，`querySelector` 只查一次
+   * 会「点了个寂寞」（README 有 4 张列表截图因此拍成了默认行情页）。
+   * 轮询最多 4 秒，元素出现后立刻点；每步之间留 220ms 让动画/层叠稳定。
+   */
   for (const selector of split(process.env.PYTHONTDX_CAPTURE_CLICK)) {
-    await evaluate(window, `document.querySelector(${json(selector)})?.click()`)
-    await wait(120)
+    const clicked = await evaluate(
+      window,
+      `(async () => {
+        const deadline = Date.now() + 4000
+        while (Date.now() < deadline) {
+          const el = document.querySelector(${json(selector)})
+          if (el) {
+            el.click()
+            return true
+          }
+          await new Promise((resolve) => setTimeout(resolve, 60))
+        }
+        return false
+      })()`
+    )
+    if (!clicked) console.warn(`[capture] 点击目标未出现：${selector}`)
+    await wait(220)
   }
 
   const probe = process.env.PYTHONTDX_CAPTURE_PROBE
