@@ -131,7 +131,7 @@ npm run build:mac:all       # 散装 .app + dmg（每次版本更新后的验证
 也可用 `PYTHONTDX_PYTHON` 指定）。打包后的 exe 自带桥接程序，用户不需要 Python。
 打包前先 `python3 -m pip install -r requirements.txt`（含 pyarrow/duckdb/Nuitka/patchelf；Linux）。
 
-**v1.8.0 起**：**通讯协议完全统一**——Electron 也加载本地 HTTP 页面，数据面只有
+**v2.0.0 起**：**通讯协议完全统一**——Electron 也加载本地 HTTP 页面，数据面只有
 `/api/*` + `/ws` 一套协议；`window.desktop` 只保留窗口/文件/通知/本机状态等壳能力。
 Web 端自选/设置/预警/公式/持仓写 localStorage，桌面写 `userData/pythontdx.json`；
 行情缓存/K 线增量/涨跌家数只有 Python 一份实现。独立窗口与 stdio 行情通道已移除，
@@ -190,7 +190,7 @@ docs/            说明文档；入口 docs/README.md，发布说明在 docs/rel
 
 ## 五、当前阶段
 
-**v1.8.0：技术债清算 + 信息密度 + 通讯统一。**
+**v2.0.0：技术债清算 + 信息密度 + 通讯统一。**
 部署模式：**Electron 桌面与 Web 二选一，不同时使用**；同机只允许一个 Python 后端持有 7709 连接（`PRINCIPLES.md` A6）。
 数据面：两端都走本地 HTTP `/api` + `/ws`；桌面 `window.desktop` 只保留壳能力。
 界面：行情相关显示全部进主工作区标签页（排行榜、板块、全市场、多股同列、选股、
@@ -206,7 +206,7 @@ docs/            说明文档；入口 docs/README.md，发布说明在 docs/rel
 `docs/22` §4.4。
 
 健康度 `npm run check` 全绿（359 个 TS 通过 + 1 skipped；343 个 Python，1 skipped）。
-1.8.0 新增：信息密度版布局、服务端面板推送 `/api/push`、备份进度 `/api/progress`、
+2.0.0 新增：信息密度版布局、服务端面板推送 `/api/push`、备份进度 `/api/progress`、
 图表工具默认收起、估值行；导航改版（去四菜单：左栏「导航」/ 右上角工具 / 「+」页面
 选择器）、表头 sticky 与列宽优化、公告与 F10 同宽、逐笔明细多列整页 + 自动滚屏 +
 红买/绿卖彩色系统、指标面板等距行、默认最大化 + 还原 1440×900；

@@ -8,7 +8,7 @@ Electron + SolidJS 双前端，Python 负责行情、离线数据与面向机器
 [**⬇ 下载最新 Release**](https://github.com/riverzhou/pythontdx/releases/latest) ·
 [功能](#功能) · [快速开始](#快速开始) · [截图](#截图) · [文档](#文档)
 
-**v1.8.0（源码，待发布）** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64  
+**v2.0.0（源码，已发布）** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64  
 [![check](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml/badge.svg)](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml)
 · `npm run check` 359 TS + 343 Python 全绿
 
@@ -56,7 +56,7 @@ Electron + SolidJS 双前端，Python 负责行情、离线数据与面向机器
 浏览器打开 `python/tdx_server.py --web-dir out/web` 的同一端口即可使用；
 Electron 也加载同一个页面，两条入口请求同一批 `/api/*`、同一条 `/ws`。
 2026-11-14 验收时桌面与 Web 同时显示 `sh000001` 3634.35、涨 765/跌 4748，
-K 线/分时/逐笔/盘口一致（截图采集于 1.8.0）。
+K 线/分时/逐笔/盘口一致（截图采集于 2.0.0）。
 
 **UI 一致性验收（2026-11-14 第二轮）**：用同一套 DOM 探针跑桌面与 Web——标题栏 6 个
 工具按钮、左栏「导航」（6 个快捷页 + 3 个视图）、「+」菜单 12 项/3 分组/宽 150px、
@@ -65,7 +65,7 @@ F10/公告）全部可开可关、深浅主题切换生效、控制台 0 报错�
 差异：窗口按钮（桌面）、F11（桌面应用全屏 / 浏览器全屏）、设置里的「浏览器通知」（Web），
 以及浏览器版备份/恢复按钮置灰并给出「请在桌面端操作」的提示。
 
-## 1.8.0 重点：技术债清算 + 信息密度
+## 2.0.0 重点：技术债清算 + 信息密度
 
 - **同屏更多信息**：标题栏 38px、状态栏 24px、行情头约 104px、图表二级工具栏默认收起；
   1440×900 主图从约 525px 提升到 610px，排行榜同屏 18 行。
@@ -463,7 +463,7 @@ docs/            章程、架构、协议、发布记录（入口见 docs/README
 | [docs/25-全库审计报告](docs/25-全库审计报告.md)                     | 审计范围、方法、发现与复核命令         |
 | [docs/README.md](docs/README.md)                                    | 全部文档的入口与分类索引               |
 | [CHANGELOG.md](CHANGELOG.md)                                        | 版本变更                               |
-| [docs/releases/](docs/releases/README.md)                           | 逐版本发布说明（1.0.0 → 1.8.0）        |
+| [docs/releases/](docs/releases/README.md)                           | 逐版本发布说明（1.0.0 → 2.0.0）        |
 
 ---
 
@@ -484,7 +484,7 @@ everything local as Parquet (ZSTD) with manifests and SHA-256 checksums.
   `trade_date` partitions, point-in-time F10 snapshots, delisted/suspended symbols kept.
 - **Scope on purpose**: A-shares only — no HK/US/futures/options, no Level-2, no order
   routing, and no third-party data vendors as fallback.
-- **Status**: 1.8.0 source (release pending) · GPL-3.0-or-later ·
+- **Status**: 2.0.0 source (released) · GPL-3.0-or-later ·
   Windows x64 / macOS arm64 / Linux x64 ·
   `npm run check` green (359 TS + 343 Python tests).
 

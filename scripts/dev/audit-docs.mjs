@@ -36,7 +36,7 @@ const PATH_ALLOW = [
   /^src\/main\/ipc\.ts$/, // 1.7.0 已删除，仅出现在历史说明
   /^src\/shared\/ipc\.ts$/, // 更早的 IPC 契约，仅出现在历史说明
   /^src\/web\/http-api\.ts$/,
-  /^scripts\/(before-pack\.cjs|sign-win\.ps1)$/, // 1.8.0 前的旧路径，见 docs/07 路径说明
+  /^scripts\/(before-pack\.cjs|sign-win\.ps1)$/, // 2.0.0 前的旧路径，见 docs/07 路径说明
   /^src\/renderer\/src\/styles\/app\.css$/,
   /^python\/test_/,
   /^src\/main\/(window|tray|capture|diagnostics|native-ipc)\.ts$/

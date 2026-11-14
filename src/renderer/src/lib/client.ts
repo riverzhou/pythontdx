@@ -4,7 +4,7 @@
  * 组件 / store 只从这里取 `api`（数据，走本地 HTTP）与 `shell`（窗口、文件、
  * 通知，桌面走 preload、浏览器降级）；不直接 `fetch`，也不直接读 `window.desktop`。
  *
- * 1.8.0 之前这里叫 `ipc.ts`：通讯统一成 HTTP 之后 IPC 已不是数据通道，
+ * 2.0.0 之前这里叫 `ipc.ts`：通讯统一成 HTTP 之后 IPC 已不是数据通道，
  * 名字跟着事实走，改为 `client.ts`。壳能力实现在 `./shell`。
  */
 import type { PythonTdxApi } from '@shared/api'

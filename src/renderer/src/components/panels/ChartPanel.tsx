@@ -628,6 +628,37 @@ export function ChartPanel(props: ChartPanelProps): JSX.Element {
             </select>
           </Show>
 
+          <Show when={!isTrend()}>
+            <select
+              class="chart-sub-select"
+              value={subIndicator()}
+              aria-label="K 线副图"
+              onChange={(event) => {
+                const value = event.currentTarget.value as 'none' | SubIndicator
+                setSubIndicator(value)
+                updateSettings({ subIndicator: value })
+              }}
+            >
+              <option value="none">副图</option>
+              <option value="macd">MACD</option>
+              <option value="kdj">KDJ</option>
+              <option value="rsi">RSI</option>
+              <option value="wr">WR</option>
+              <option value="cci">CCI</option>
+              <option value="bias">BIAS</option>
+              <option value="dmi">DMI</option>
+              <option value="obv">OBV</option>
+              <option value="roc">ROC</option>
+              <option value="psy">PSY</option>
+              <option value="vr">VR</option>
+              <option value="cr">CR</option>
+              <option value="bbi">BBI</option>
+              <option value="dma">DMA</option>
+              <option value="trix">TRIX</option>
+              <option value="sar">SAR</option>
+            </select>
+          </Show>
+
           <button
             class="chip chart-tools-toggle"
             data-active={toolsOpen()}
@@ -883,37 +914,6 @@ export function ChartPanel(props: ChartPanelProps): JSX.Element {
             >
               清除区间
             </button>
-          </Show>
-
-          <Show when={!isTrend()}>
-            <select
-              class="chart-sub-select"
-              value={subIndicator()}
-              aria-label="K 线副图"
-              onChange={(event) => {
-                const value = event.currentTarget.value as 'none' | SubIndicator
-                setSubIndicator(value)
-                updateSettings({ subIndicator: value })
-              }}
-            >
-              <option value="none">副图</option>
-              <option value="macd">MACD</option>
-              <option value="kdj">KDJ</option>
-              <option value="rsi">RSI</option>
-              <option value="wr">WR</option>
-              <option value="cci">CCI</option>
-              <option value="bias">BIAS</option>
-              <option value="dmi">DMI</option>
-              <option value="obv">OBV</option>
-              <option value="roc">ROC</option>
-              <option value="psy">PSY</option>
-              <option value="vr">VR</option>
-              <option value="cr">CR</option>
-              <option value="bbi">BBI</option>
-              <option value="dma">DMA</option>
-              <option value="trix">TRIX</option>
-              <option value="sar">SAR</option>
-            </select>
           </Show>
 
           <Show when={lastPushAt() > 0}>
