@@ -372,6 +372,14 @@ F10 是 16 段目录（0x02cf），「公告」面板另有 19 个在线页签�
 打包版自带本地行情服务（Nuitka 单文件），用户不需要安装 Python；Windows 包是自签名，
 只保证完整性，SmartScreen 仍会提示「未知发布者」。
 
+**Linux 图形后端（默认 Wayland）**：默认 `PYTHONTDX_GRAPHICS=wayland`，启动参数为
+`--ozone-platform-hint=auto --enable-wayland-ime --enable-features=WaylandWindowDecorations`。
+在 Wayland 会话里直接走原生 Wayland（不用 XWayland），X11 会话自动退回 X11。
+排障时可用 `PYTHONTDX_GRAPHICS=x11` 强制 X11/XWayland，或 `vulkan` 走
+XWayland + ANGLE Vulkan（Chromium 不允许 Wayland 表面与 Vulkan 同时启用，驱动不可用时
+会自动重启一次回退 Wayland）。托盘依赖 StatusNotifier/AppIndicator（GNOME 需要扩展），
+窗口位置在 Wayland 下由合成器决定、不一定按上次坐标恢复。
+
 ### 从源码：依赖
 
 - Node.js ≥ 20.19（实测 24.x）
