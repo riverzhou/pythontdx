@@ -9,13 +9,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, session } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
-import { IPC } from '@shared/ipc'
-import { registerIpcHandlers } from './ipc'
-import { QuotePoller } from './services/poller'
-import { PushHub } from './services/push'
-import { fetchPushTask } from './services/push-fetch'
-import { closeTdx, fetchMarketStatus, warmTdxBridge } from './services/tdx'
-import { setMarketCalendarStatus } from '@shared/market'
+import { registerNativeHandlers } from './services/native-ipc'
+import { startBackendServer, type BackendServer } from './services/server'
 import { AppStore } from './services/store'
 import { migrateLegacyPortableData, migrateLegacyUserData } from './services/legacy'
 import {
@@ -23,8 +18,8 @@ import {
   readAppImageHandler,
   shouldOfferAppImageFix
 } from './services/linux-desktop'
-import { createMainWindow } from './window'
-import { destroyTray, setupTray } from './tray'
+import { createMainWindow } from './services/window'
+import { destroyTray, setupTray } from './services/tray'
 
 const APP_ID = 'com.pythontdx.app'
 const APP_NAME = 'pythontdx'
@@ -34,8 +29,7 @@ const PORTABLE_DATA_DIR = 'pythontdx-data'
 
 let mainWindow: BrowserWindow | null = null
 let store: AppStore | undefined
-let poller: QuotePoller | undefined
-let pushHub: PushHub | undefined
+let backend: BackendServer | undefined
 let flushing = false
 let quitting = false
 
@@ -137,10 +131,7 @@ if (process.env.PYTHONTDX_USER_DATA) {
   app.setPath('userData', process.env.PYTHONTDX_USER_DATA)
 }
 
-if (
-  process.argv.includes('--install-desktop') ||
-  app.commandLine.hasSwitch('install-desktop')
-) {
+if (process.argv.includes('--install-desktop') || app.commandLine.hasSwitch('install-desktop')) {
   app.setName(APP_NAME)
   app
     .whenReady()
@@ -195,9 +186,7 @@ function bootstrap(): void {
     if (flushing || !store) return
     flushing = true
     event.preventDefault()
-    poller?.stop()
-    pushHub?.stop()
-    closeTdx()
+    backend?.stop()
     void store.flush().finally(() => app.quit())
   })
 
@@ -241,9 +230,7 @@ function writeDesktopMarker(path: string, marker: DesktopMarker): void {
 async function installDesktopFromAppImage(): Promise<void> {
   const appImagePath = process.env.APPIMAGE
   if (!appImagePath) throw new Error('当前不是 AppImage 启动')
-  const iconPath = process.env.APPDIR
-    ? join(process.env.APPDIR, 'pythontdx.png')
-    : undefined
+  const iconPath = process.env.APPDIR ? join(process.env.APPDIR, 'pythontdx.png') : undefined
   await installLinuxDesktopIntegration({
     appImagePath,
     iconPath: iconPath && existsSync(iconPath) ? iconPath : undefined,
@@ -340,104 +327,77 @@ function onReady(): void {
 
   const currentStore = store
 
-  poller = new QuotePoller({
-    emit: (update) => {
-      // 多窗口：每扇窗都订阅了同一份行情流，不能只推主窗口。
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (!window.isDestroyed()) window.webContents.send(IPC.quoteUpdate, update)
-      }
-    },
-    // 窗口不可见时跳过拉取，省流量也省上游压力（可在设置里关掉）
-    canFetch: () => {
-      if (!currentStore.state.settings.pauseWhenHidden) return true
-      if (!mainWindow || mainWindow.isDestroyed()) return false
-      return mainWindow.isVisible() && !mainWindow.isMinimized()
-    }
-  })
-
-  const canFetch = (): boolean => {
-    if (!currentStore.state.settings.pauseWhenHidden) return true
-    if (!mainWindow || mainWindow.isDestroyed()) return false
-    return mainWindow.isVisible() && !mainWindow.isMinimized()
-  }
-
-  pushHub = new PushHub(
-    (update) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (!window.isDestroyed()) window.webContents.send(IPC.pushUpdate, update)
-      }
-    },
-    fetchPushTask,
-    canFetch
-  )
-
-  registerIpcHandlers({
+  registerNativeHandlers({
     store: currentStore,
-    poller,
-    pushHub,
     getWindow: () => mainWindow
   })
 
-  // 先拉起 Python，窗口加载与 sidecar 启动并行；首屏缓存请求不用再等进程冷启动。
-  warmTdxBridge()
+  /*
+   * 统一传输：桌面窗口和浏览器都连同一个本地 HTTP/WS 服务。
+   * 开发模式固定 8765，Vite 的 /api、/ws 代理指向它；
+   * 打包模式让系统分配端口，避免和用户机器上的其它程序冲突。
+   */
+  const devPort = is.dev ? Number(process.env.PYTHONTDX_DEV_PORT ?? 8765) : 0
+  void startBackendServer({ preferredPort: devPort })
+    .then((started) => {
+      backend = started
+      const devUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
+      const windowUrl = devUrl || started.baseUrl
 
-  // 主进程也持有一份 TDX 交易日历：QuotePoller 的降频要用它，且渲染层
-  // 的 IPC 实例与主进程不是同一个模块实例。
-  const refreshCalendar = (): void => {
-    void fetchMarketStatus()
-      .then((status) => setMarketCalendarStatus(status))
-      .catch(() => undefined)
-  }
-  // 首帧行情优先：日历状态晚 1 秒再拉，避免和 sidecar 首批行情抢队列。
-  const firstCalendar = setTimeout(refreshCalendar, 1000)
-  firstCalendar.unref()
-  const calendarTimer = setInterval(refreshCalendar, 5 * 60_000)
-  calendarTimer.unref()
+      const openWindow = (): BrowserWindow => {
+        const window = createMainWindow({
+          bounds: currentStore.bounds,
+          onBoundsChange: (bounds) => currentStore.saveBounds(bounds),
+          // 截图工具用 app.exit() 退出，绕过 before-quit；这里先把服务进程树收掉，
+          // 否则 Nuitka onefile 的引导进程退出后，真正的服务进程会变孤儿继续占 7709。
+          flushState: async () => {
+            backend?.stop()
+            await currentStore.flush()
+          },
+          url: windowUrl
+        })
+        window.on('close', (event) => {
+          if (!quitting && currentStore.state.settings.closeToTray !== false) {
+            event.preventDefault()
+            console.log('[tray] 关闭窗口 -> 隐藏到托盘')
+            window.hide()
+          }
+        })
+        window.on('closed', () => {
+          if (mainWindow === window) mainWindow = null
+        })
+        return window
+      }
 
-  mainWindow = createMainWindow({
-    bounds: currentStore.bounds,
-    onBoundsChange: (bounds) => currentStore.saveBounds(bounds),
-    // 截图工具用 app.exit() 退出，绕过 before-quit，所以得自己把状态落盘
-    flushState: () => currentStore.flush()
-  })
+      mainWindow = openWindow()
+      setupTray(mainWindow)
 
-  mainWindow.on('close', (event) => {
-    if (!quitting && currentStore.state.settings.closeToTray !== false) {
-      event.preventDefault()
-      console.log('[tray] 关闭窗口 -> 隐藏到托盘')
-      mainWindow?.hide()
-    }
-  })
+      // 等首屏画完再问，别让对话框挡住启动；失败只记录日志，不影响行情。
+      const windowForPrompt = mainWindow
+      setTimeout(() => {
+        void offerLinuxDesktopFix(windowForPrompt).catch((error) => {
+          console.warn('[linux-desktop] 检查失败：', error)
+        })
+      }, 1500)
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-    poller?.stop()
-    pushHub?.stop()
-  })
+      // macOS 点 Dock 图标时重新开窗
+      app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length > 0) return
+        mainWindow = openWindow()
+      })
 
-  setupTray(mainWindow)
-
-  // 等首屏画完再问，别让对话框挡住启动；失败只记录日志，不影响行情。
-  const windowForPrompt = mainWindow
-  setTimeout(() => {
-    void offerLinuxDesktopFix(windowForPrompt).catch((error) => {
-      console.warn('[linux-desktop] 检查失败：', error)
+      if (is.dev) {
+        console.log(`[main] 配置文件：${join(app.getPath('userData'), STATE_FILE)}`)
+      }
     })
-  }, 1500)
-
-  // macOS 点 Dock 图标时重新开窗
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length > 0) return
-    mainWindow = createMainWindow({
-      bounds: currentStore.bounds,
-      onBoundsChange: (bounds) => currentStore.saveBounds(bounds),
-      flushState: () => currentStore.flush()
+    .catch((error: unknown) => {
+      console.error('[api] 启动失败：', error)
+      dialog.showErrorBox(
+        '行情服务启动失败',
+        error instanceof Error ? error.message : String(error)
+      )
+      app.quit()
     })
-  })
-
-  if (is.dev) {
-    console.log(`[main] 配置文件：${join(app.getPath('userData'), STATE_FILE)}`)
-  }
 }
 
 /* ------------------------------------------------------------ 兜底日志 */

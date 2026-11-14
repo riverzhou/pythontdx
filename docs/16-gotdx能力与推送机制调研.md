@@ -10,10 +10,12 @@
 > **引用约定**：`文件:行` 均指 gotdx 仓库内路径；`tdx_bridge.py:行` 指 pythontdx。凡未实测、
 > 仅由源码静态推断的结论一律标 **【未验证】**。凡与本文件结论冲突的历史认知，以实测为准并在
 > 第 10 节登记。
+
 >
 > **行号时效**：gotdx 源码未变动，行号可直接用；`python/tdx_bridge.py` 在调研期间仍在增长
 > （快照 7 205 行），文中 `tdx_bridge.py:行` 均取自该快照，**定位时请以函数名/符号名为准**，
-> 行号仅作辅助。
+> 行号仅作辅助。2026-11-14 起协议层已拆到 `python/tdxproto/`（常量/编解码/连接/请求/解析/板块），
+> 这些行号不再对应任何文件，模块归属见 `docs/24` §3.6。
 
 ## 落地状态（pythontdx，2026-11-04 主代理追加）
 
@@ -426,7 +428,7 @@ obj.reply.Open = float64(closeRaw+openDiff) / 100.0
 
 - `0x051c`（`get_index_momentum.go:70-91`）：`Count u16` + `Count` 个变长增量，本地累加得累计动量。
 - **A 股适用性**：中。pythontdx 的「涨跌家数」目前靠 `market_breadth` 翻 `0x054b` 全表
-  （`tdx_bridge.py:4195`、`:4203`，`docs/07` 第三十六节记录过一次 14.97s→2.9s 的优化），
+  （`tdx_bridge.py:4195`、`:4203`，`docs/releases/编年史.md` 第三十六节记录过一次 14.97s→2.9s 的优化），
   若 `0x051d` 的 `UpCount/DownCount` 对沪深指数有效，可直接省掉全表翻页。
   **但该结论依赖服务端行为，属【未验证】——必须先探测再改架构。**
 - **落点**：先写探针脚本（`scripts/`），验证 `sh000001`/`sz399001` 的 `UpCount/DownCount`
@@ -1381,7 +1383,7 @@ if math.Abs(bar.Open-12.345) > 0.0001 { ... }
 
 | 建议 | 理由 | 落点 |
 | --- | --- | --- |
-| 为每个新协议补「构造→解析→断言」单测 | 与 gotdx 同法，成本低 | `python/test_tdx.py` |
+| 为每个新协议补「构造→解析→断言」单测 | 与 gotdx 同法，成本低 | `python/tests/test_tdx.py` |
 | 补「截断/畸形报文」用例（每种新协议 2 条） | gotdx 的越界 panic 就是缺这个 | 同上 |
 | 引入 `python/fixtures/` 真实抓包 golden | gotdx 缺，别一起缺 | `python/fixtures/*.bin` + sha256 |
 | 订阅 Hub 的 12 条语义测试照抄 gotdx 用例清单 | 语义完备 | 新 `test_subscription.py` |

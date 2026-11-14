@@ -1,0 +1,1213 @@
+/* ------------------------------------------------------------ 独立窗口 */
+.detached-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 8px;
+  gap: 8px;
+}
+
+.detached-window__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 4px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.detached-window__head code {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+
+.detached-window__hint {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.detached-window__chart {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.detached-window__chart > .chart-card {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ------------------------------------------------------------ 布局精修 */
+.sidebar__head {
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  padding: 12px 12px 8px;
+}
+
+.sidebar__title {
+  /* 标题与右侧操作同排：标题吃剩余宽度，按钮固定在右端 */
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sidebar__head .btn--icon {
+  width: 26px;
+  height: 24px;
+}
+
+.chart-card__head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chart-toolbar--primary {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chart-toolbar--secondary {
+  align-items: center;
+}
+
+/* 副图下拉：不要用系统白底，跟随深/浅主题并保证字色对比 */
+.chart-sub-select,
+.chart-ext-select {
+  height: 26px;
+  padding: 0 24px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  color: var(--text-1);
+  background-color: var(--bg-base);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+    linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 11px) 11px,
+    calc(100% - 7px) 11px;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  appearance: none;
+  cursor: pointer;
+}
+
+.chart-sub-select:hover,
+.chart-ext-select:hover {
+  border-color: var(--accent);
+}
+
+.chart-sub-select:focus,
+.chart-ext-select:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chart-sub-select option,
+.chart-ext-select option {
+  color: var(--text-1);
+  background: var(--bg-base);
+}
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+.chart-headline {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.chart-headline .btn--bare {
+  height: 24px;
+  padding: 0 7px;
+  font-size: var(--fs-2xs);
+}
+
+.chart-legend {
+  padding-right: 4px;
+}
+
+.chart-ma-overlay {
+  position: absolute;
+  top: 24px;
+  left: 14px;
+  z-index: 2;
+  display: flex;
+  gap: 10px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-base) 68%, transparent);
+  pointer-events: none;
+  transition: opacity var(--dur-1) var(--ease);
+}
+
+.chart-ma-overlay--hidden {
+  opacity: 0;
+}
+
+.segmented__item {
+  padding: 0 9px;
+}
+
+.chart-minute-tab {
+  min-width: 22px;
+  padding: 0 2px;
+}
+
+/* ------------------------------------------------------------ 窄窗适配 */
+@media (max-width: 1240px) {
+  /* 窄窗仍保留迷你图：只压缩价格列间距，不隐藏走势。 */
+  .watch-row__nums,
+  .sector-row__nums {
+    min-width: 62px;
+  }
+
+  .sidebar__head .btn--icon {
+    width: 23px;
+    height: 23px;
+  }
+
+  .sidebar__foot {
+    padding: 8px 10px;
+    font-size: 10px;
+    line-height: 1.5;
+  }
+
+  /* 矮窗口时右栏内部滚动，避免盘口买五/指标被硬裁掉 */
+  .rail {
+    overflow-y: auto;
+  }
+
+  .panel--book {
+    flex: 0 0 auto;
+    min-height: 338px;
+  }
+}
+
+/* ------------------------------------------------------------ 可拖拽栏宽 */
+.app {
+  position: relative;
+}
+
+.layout-resizer {
+  position: absolute;
+  z-index: 30;
+  top: var(--titlebar-h);
+  bottom: var(--statusbar-h);
+  width: 7px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.layout-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border-strong);
+  opacity: 0.35;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    opacity var(--dur-1) var(--ease);
+}
+
+.layout-resizer:hover::after,
+.layout-resizer:active::after {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.layout-resizer--sidebar {
+  left: calc(var(--sidebar-w) - 3px);
+}
+
+.layout-resizer--rail {
+  right: calc(var(--rail-w) - 3px);
+}
+
+.app--empty .layout-resizer--rail {
+  display: none;
+}
+
+/* 专注模式已移除：图表头只保留置顶/导出/新窗等常用操作 */
+
+/* 宽图表 / 最小窗口：名称、价格与操作按钮自动换行，避免名称逐字竖排 */
+.quote-header__top {
+  flex-wrap: wrap;
+}
+
+.quote-header__identity {
+  flex: 1 1 auto;
+  min-width: 190px;
+}
+
+.quote-header__name {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.quote-header__name > span:first-child {
+  white-space: nowrap;
+}
+
+.quote-header__code {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quote-header__price-block {
+  flex: none;
+}
+
+@media (max-width: 1280px) {
+  .quote-header {
+    padding: 8px 12px;
+    gap: 6px;
+  }
+
+  .quote-header__name {
+    font-size: var(--fs-lg);
+  }
+
+  .quote-header__price {
+    font-size: var(--fs-2xl);
+  }
+
+  .quote-header__delta {
+    font-size: var(--fs-sm);
+  }
+}
+
+/* ------------------------------------------------------ 独立行情服务器窗口 */
+.server-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 22px 24px 16px;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(90, 120, 255, 0.12), transparent 42%), var(--bg-base);
+}
+
+.server-page__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex: none;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.server-page__eyebrow {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+}
+
+.server-page__title {
+  margin: 4px 0 3px;
+  color: var(--text-1);
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.server-page__sub {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.server-page__source {
+  margin: 4px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.server-page__source code,
+.server-page__sub code {
+  color: var(--text-2);
+  font-family: var(--font-num);
+  overflow-wrap: anywhere;
+}
+
+.server-page__close {
+  flex: none;
+}
+
+.server-page__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+}
+
+.server-page__summary,
+.server-page__current,
+.server-page__show-all {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.server-page__show-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.server-page__current {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.server-page__error {
+  flex: none;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-xs);
+  color: var(--down);
+  background: var(--down-soft);
+  font-size: var(--fs-xs);
+}
+
+.server-page__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+
+.server-page__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 58px;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.server-page__item:last-child {
+  border-bottom: 0;
+}
+
+.server-page__item:hover:not(:disabled) {
+  background: var(--panel-hover);
+}
+
+.server-page__item:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.server-page__item--active {
+  color: var(--text-1);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.server-page__item--error {
+  opacity: 0.45;
+}
+
+.server-page__host {
+  overflow: hidden;
+  font-family: var(--font-num);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-page__latency {
+  color: var(--text-3);
+  font-family: var(--font-num);
+  font-size: var(--fs-xs);
+  text-align: right;
+}
+
+.server-page__state {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  text-align: right;
+}
+
+.server-page__empty {
+  padding: 36px 16px;
+  color: var(--text-3);
+  text-align: center;
+  font-size: var(--fs-xs);
+}
+
+.server-page__foot {
+  flex: none;
+  padding-top: 10px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.server-page__foot code {
+  color: var(--text-2);
+  font-family: var(--font-num);
+}
+
+/* ============================================================================
+   原生下拉统一底色
+   ----------------------------------------------------------------------------
+   各处的 <select> 原本分别用 --panel / --bg-base / transparent，深色主题下
+   控制框会透出背后内容，浅色主题下又和面板不是同一个白；Windows 上原生
+   选项弹层还会用系统色。这里统一成实心面板色，并把 option 的颜色写死，
+   保证深/浅两套主题下控制框与展开列表都是「同一块底色 + 可读文字」。
+   ========================================================================== */
+select,
+.alert__select,
+.chart-sub-select,
+.chart-ext-select,
+.chart-minute-select,
+.screener__field select,
+.screener__formula-scope,
+.data__bulk-scope,
+.data__kline-period,
+.custom-select,
+.statusbar__format {
+  background-color: var(--panel-solid);
+  color: var(--text-1);
+}
+
+select option,
+select optgroup {
+  background-color: var(--panel-solid);
+  color: var(--text-1);
+}
+
+/* 63：行情服务器改成主窗口内的弹层，不再另开系统窗口套一层标题栏 */
+.server-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 55%);
+  backdrop-filter: blur(6px);
+}
+
+.server-shell {
+  width: min(560px, 94vw);
+  height: min(680px, 90vh);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--panel-solid);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 55%);
+}
+
+.server-shell .server-page {
+  border-radius: var(--r-lg);
+}
+
+/* ====================================================== 工作区标签 / 主区视图 */
+/*
+ * 行情相关内容全部进主区：标签栏固定在图表上方，切换标签不改变窗口结构。
+ * 非「行情」标签时右栏整列收起，列表/多股/复盘拿到完整宽度。
+ */
+.workspace {
+  gap: 6px;
+  padding: 8px var(--gutter) var(--edge) var(--edge);
+}
+
+.workspace-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  min-height: 30px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.workspace-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workspace-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 24px;
+  padding: 0 8px 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
+.workspace-tab:hover {
+  color: var(--text-1);
+  background: var(--panel-hover);
+}
+
+.workspace-tab--active {
+  color: var(--text-1);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.workspace-tab__close {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-tab__close:hover {
+  color: var(--text-1);
+  background: var(--panel-hover);
+}
+
+.workspace-tabs__new .menu__trigger {
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  color: var(--text-3);
+}
+
+.workspace-tabs__new .menu__caret {
+  display: none;
+}
+
+.workspace__body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--gutter);
+  min-height: 0;
+  min-width: 0;
+}
+
+.app--view {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
+}
+
+.app--view .rail,
+.app--view .layout-resizer--rail {
+  display: none;
+}
+
+.app--sidebar-hidden.app--view {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+/* 嵌入主区的面板：去掉全屏遮罩，直接铺满工作区。 */
+.panel-embed {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  display: block !important;
+  padding: 0 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+}
+
+.panel-embed > section {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  border: 0 !important;
+  border-radius: var(--r-md) !important;
+  box-shadow: none !important;
+}
+
+.watch-full.panel-embed,
+.sector-picker.panel-embed {
+  position: absolute !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: var(--r-md) !important;
+  background: var(--panel-solid) !important;
+  box-shadow: none !important;
+}
+
+/* 板块选择器的面板根节点是 div（其它面板是 section），单独铺满。 */
+.sector-picker.panel-embed {
+  display: flex !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+}
+
+.sector-picker.panel-embed > .sector-picker__panel {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  border: 0 !important;
+  border-radius: var(--r-md) !important;
+  box-shadow: none !important;
+}
+
+.view-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-3);
+}
+
+/* 逐笔明细：不是弹窗，是主区里的一个完整视图。 */
+.view-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel-solid);
+}
+
+.view-shell__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  min-height: 34px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.view-shell__title {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.view-shell__code {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
+.view-shell__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 12px 12px;
+}
+
+.view-empty__title {
+  color: var(--text-1);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.view-empty__hint {
+  font-size: var(--fs-xs);
+}
+
+/* 1024 宽笔记本：优先保住主图和盘口，指标换两行，菜单不挤搜索框。 */
+@media (max-width: 1180px) {
+  .app:not(.app--view) {
+    grid-template-columns: 224px minmax(0, 1fr) 272px;
+  }
+
+  .app--sidebar-hidden:not(.app--view) {
+    grid-template-columns: 0 minmax(0, 1fr) 272px;
+  }
+
+  .quote-metrics {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .titlebar__title {
+    display: none;
+  }
+
+  .search-wrap {
+    width: 220px;
+  }
+
+  .app--view {
+    grid-template-columns: 224px minmax(0, 1fr) 0;
+  }
+
+  .app--sidebar-hidden.app--view {
+    grid-template-columns: 0 minmax(0, 1fr) 0;
+  }
+
+  .panel__head--tabs > .statusbar__text {
+    display: none;
+  }
+
+  .watch-row__spark-slot {
+    display: none;
+  }
+
+  .watch-row__chg {
+    display: none;
+  }
+
+  /* 迷你图列已隐藏，网格模板也要去掉 46px，否则名称仍被挤成 3 个字。 */
+  .watch-row {
+    grid-template-columns: minmax(0, 1fr) minmax(56px, auto) 18px;
+    gap: 6px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+
+/* ====================================================== 1.8 信息密度精修 */
+/*
+ * 行情终端的第一目标是「同屏更多有效信息」。这一层只压缩装饰性留白，
+ * 不改字号层级和点击目标高度；图表因此多出约 100px 高度。
+ */
+
+.titlebar {
+  gap: var(--sp-2);
+  padding-left: 10px;
+}
+
+.titlebar__logo {
+  width: 18px;
+  height: 18px;
+}
+
+.titlebar__title {
+  font-size: 12px;
+}
+
+.titlebar__link,
+.menu__trigger {
+  height: 24px;
+}
+
+.market-clock {
+  min-width: 92px;
+  padding: 0 var(--sp-2);
+}
+
+.market-clock__time {
+  font-size: 17px;
+}
+
+.market-clock__meta {
+  font-size: 9px;
+}
+
+.search-wrap {
+  width: 280px;
+}
+
+.search {
+  height: 26px;
+}
+
+.workspace {
+  gap: 4px;
+  padding: 6px 8px 8px 8px;
+}
+
+.workspace-tabbar {
+  min-height: 26px;
+  padding: 1px 3px;
+}
+
+.workspace-tab {
+  height: 21px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.workspace-tabs__new .menu__trigger {
+  height: 20px;
+}
+
+.quote-header {
+  gap: 5px;
+  padding: 7px 12px 6px;
+}
+
+.quote-header__top {
+  gap: var(--sp-3);
+}
+
+.quote-header__name {
+  gap: 6px;
+  font-size: 18px;
+}
+
+.quote-header__code {
+  margin-top: 0;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.quote-header__price {
+  font-size: 30px;
+  padding: 0 4px;
+}
+
+.quote-header__delta {
+  gap: 0;
+  font-size: 12px;
+}
+
+.quote-metrics {
+  gap: 2px 6px;
+  padding-top: 5px;
+}
+
+.metric {
+  gap: 0;
+}
+
+.metric__label {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.metric__value {
+  font-size: 12px;
+}
+
+.chart-card__head {
+  gap: 3px;
+  padding: 4px 8px;
+}
+
+.chart-toolbar {
+  gap: 4px;
+}
+
+.chart-toolbar--primary {
+  padding-bottom: 3px;
+}
+
+.chart-toolbar--secondary {
+  padding-top: 1px;
+}
+
+.segmented {
+  padding: 1px;
+}
+
+.segmented__item {
+  height: 21px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.chart-minute-tab {
+  height: 21px;
+  min-width: 22px;
+}
+
+.chart-ext-select,
+.chart-sub-select {
+  height: 22px;
+}
+
+.chart-headline {
+  gap: 8px;
+}
+
+.chart-card__body {
+  padding: 2px 4px 0;
+}
+
+/* 盘口只占内容高度，把余量让给逐笔/指标列表 */
+.rail {
+  gap: 6px;
+  padding: 6px 6px 6px 0;
+}
+
+.panel__head {
+  padding: 4px 10px;
+}
+
+.panel__body {
+  padding: 6px 10px;
+}
+
+.rail--stacked .panel--book .panel__body {
+  min-height: 176px;
+}
+
+.rail-tab {
+  padding: 3px 6px;
+}
+
+.tape__head,
+.tape__row {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.sidebar__head {
+  gap: 4px;
+  padding: 7px 8px 5px;
+}
+
+.sidebar__title {
+  height: 18px;
+  font-size: 12px;
+}
+
+.sidebar__head .btn--icon {
+  width: 23px;
+  height: 22px;
+}
+
+.watch-row {
+  gap: 6px;
+  padding: 2px 8px;
+}
+
+.watch-row__name {
+  font-size: 12px;
+}
+
+.watch-row__price {
+  font-size: 12px;
+}
+
+.watch-row__code {
+  font-size: 9px;
+}
+
+.watch-row__spark-slot,
+.watch-row .sparkline {
+  width: 40px !important;
+  min-width: 40px;
+  max-width: 40px;
+  height: 17px;
+}
+
+.watch-row__spark-slot {
+  width: 40px;
+  min-width: 40px;
+}
+
+.sidebar__foot {
+  padding: 5px 8px;
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.statusbar {
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.statusbar__btn {
+  padding: 1px 5px;
+}
+
+.sidebar__list .group-empty {
+  padding: 16px 10px;
+  font-size: 10px;
+}
+
+.chart-tools-toggle {
+  margin-left: auto;
+}
+
+.chart-toolbar--collapsed {
+  display: none;
+}
+
+.metric__value {
+  font-size: 11px;
+}
+
+.rail--stacked .panel--book {
+  min-height: 0;
+}
+
+.rail--stacked .panel--book .panel__body {
+  flex: none;
+  height: 250px;
+  min-height: 250px;
+  max-height: 250px;
+}
+
+/* 数据表密度：行情列表优先“多显示几行”，而不是每行留大块呼吸空间。 */
+.ranking__table th,
+.ranking__table td {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.block__table th,
+.block__table td,
+.screener__table th,
+.screener__table td,
+.market__table th,
+.market__table td,
+.portfolio-table th,
+.portfolio-table td,
+.dragon__table th,
+.dragon__table td,
+.unusual__table th,
+.unusual__table td,
+.mreport__table th,
+.mreport__table td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.ranking__table,
+.block__table,
+.screener__table,
+.market__table,
+.portfolio-table,
+.dragon__table,
+.unusual__table,
+.mreport__table {
+  font-size: 11px;
+}
+
+.quote-header__valuation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 10px;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.quote-header__valuation b {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+@media (max-width: 1180px) {
+  /* 1024 宽时底部提示会压住横轴时间刻度；交互本身仍可通过滚轮/拖拽完成。 */
+  .chart-zoom-hint {
+    display: none;
+  }
+}
+
+.ranking__head {
+  padding: 8px 14px 6px;
+}
+
+.ranking__title {
+  font-size: 18px;
+}
+
+.ranking__eyebrow {
+  font-size: 9px;
+}
+
+.ranking__tabs {
+  gap: 2px;
+  padding: 5px 14px;
+}
+
+.ranking__tab {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.chart-headline__meta {
+  margin-right: auto;
+}
+
+/* 主区标签页的页头也按行情终端密度收口，把高度留给表格/图表。 */
+.block__head,
+.screener__head,
+.market__head,
+.multi__head,
+.dragon__head,
+.unusual__head,
+.portfolio__head,
+.mreport__head {
+  padding-top: 8px;
+  padding-bottom: 6px;
+}
+
+.block__tabs,
+.screener__presets,
+.market__tabs,
+.dragon__tools,
+.unusual__tools {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}

@@ -6,7 +6,7 @@
 > 九榜排行。正确做法是 **MAC 优先 + 7709 兜底**，并按数据集选择数据源。
 >
 > 实现：`python/tdx_mac.py`（原有 5 条）+ `python/tdx_mac_ext.py`（本轮 6 条）；
-> 证据：`python/test_mac_ext.py` + 2026-11-04 实盘探针。
+> 证据：`python/tests/test_mac_ext.py` + 2026-11-04 实盘探针。
 
 ## 1. MAC 是什么
 

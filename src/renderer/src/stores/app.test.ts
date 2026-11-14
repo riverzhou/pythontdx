@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { patch } = vi.hoisted(() => ({ patch: vi.fn(async () => undefined) }))
 
-vi.mock('../lib/ipc', () => ({
-  api: { state: { patch } },
+vi.mock('../lib/client', () => ({
+  api: {},
+  shell: { state: { patch } },
   errorMessage: (error: unknown) => String(error)
 }))
 

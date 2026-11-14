@@ -7,7 +7,7 @@
 import { createSignal } from 'solid-js'
 import type { AlertEvent, Quote } from '@shared/types'
 import { evaluateAlerts } from '@shared/alerts'
-import { api } from '../lib/ipc'
+import { shell } from '../lib/client'
 import { appState, appendAlertEvents, clearAlertEventHistory, markAlertsTriggered } from './app'
 
 const [events, setEvents] = createSignal<AlertEvent[]>([])
@@ -28,7 +28,7 @@ export function scanAlerts(quotes: readonly Quote[], now = Date.now()): void {
     appendAlertEvents(scan.events)
     setLatest(scan.events[scan.events.length - 1] ?? null)
     for (const event of scan.events) {
-      void api.app.notify('pythontdx 预警', event.message).catch(() => undefined)
+      void shell.app.notify('pythontdx 预警', event.message).catch(() => undefined)
     }
   }
 }

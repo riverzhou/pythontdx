@@ -1,14 +1,14 @@
 /**
- * 让渲染进程的 TypeScript 知道 window.api 长什么样。
+ * 让渲染进程的 TypeScript 知道 `window.desktop` 长什么样。
  *
- * 这个文件同时被 tsconfig.node.json（preload 侧）和 tsconfig.web.json（渲染侧）包含，
- * 所以类型定义只有这一份，主进程改了契约，两边会同时报错——这就是我们想要的。
+ * 数据面已统一为 HTTP/WebSocket，`window.api` 不再存在；
+ * 桌面壳能力只通过 `window.desktop` 暴露，Web 端没有这个对象。
  */
-import type { PythonTdxApi } from '@shared/ipc'
+import type { DesktopApi } from '@shared/desktop'
 
 declare global {
   interface Window {
-    api: PythonTdxApi
+    desktop?: DesktopApi
   }
 }
 

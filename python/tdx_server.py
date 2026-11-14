@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""pythontdx 的只读 HTTP 行情 API。
+"""pythontdx 的只读 HTTP/WS 行情 API（桌面与浏览器的唯一数据面）。
 
-为什么还要这一层：
-  · Electron 桌面用 stdio sidecar；浏览器/Web 端需要一个普通的 HTTP 入口；
-  · 先把「协议 + 解析」复用成 JSON API，Web UI 才能和桌面共用同一套数据语义。
+为什么是这一层：
+  · 1.7.0 起 Electron 与浏览器加载同一个页面、连同一个本地服务；
+  · 协议 + 解析复用成 JSON API，两端共用同一套数据语义（A8）。
 
 实现刻意只用标准库：ThreadingHTTPServer + json。单用户本地服务，所有 Bridge
 调用串行化（TdxConnection 不是线程安全的），默认只绑 127.0.0.1。
@@ -15,6 +15,7 @@ import argparse
 import base64
 import hashlib
 import json
+import queue
 import socket
 import struct
 import mimetypes
@@ -30,10 +31,14 @@ from urllib.parse import parse_qs, unquote, urlparse
 from tdx_bridge import (
     Bridge,
     TdxError,
+    backup_create,
+    backup_inspect,
+    backup_restore,
     ms_until_session_change,
     shanghai_clock,
 )
 from subscription_hub import SubscriptionHub
+from push_manager import PushManager
 
 MAX_BODY_BYTES = 1024 * 1024
 
@@ -72,6 +77,10 @@ class TdxApiServer(ThreadingHTTPServer):
         # Bridge 内（桌面 IPC 与 Web 共用同一份规则）；这里只防止并发开新扫描。
         # 锁顺序固定为 breadth_lock -> lock。
         self.breadth_lock = threading.Lock()
+        # 备份/恢复进度：广播给所有打开的 `/api/progress` SSE 客户端。
+        # 进度是辅助信息，慢客户端丢帧即可，不能反向阻塞备份线程。
+        self.progress_lock = threading.Lock()
+        self.progress_clients: set[queue.Queue[dict]] = set()
         self.web_dir = Path(web_dir).resolve() if web_dir else None
         # SSE/WebSocket 共享一个订阅 Hub：同一组代码只轮询一次，结果扇出。
         # 收盘/午休由 _quote_interval 统一降频，客户端无需感知。
@@ -80,11 +89,83 @@ class TdxApiServer(ThreadingHTTPServer):
             interval_for=_quote_interval,
             boundary_for=ms_until_session_change,
         )
+        self.push = PushManager(self._fetch_push_task)
 
     def _fetch_quotes(self, codes: list[str]) -> list[dict]:
         # 与 Electron IPC、/api/quotes 共用同一套实时行情编排
         with self.lock:
             return self.bridge.live_quotes(codes)
+
+    def _fetch_push_task(self, task: dict, first: bool) -> Any:
+        """面板级推送的任务分派；与 POST 路由调用同一批 Bridge 方法。"""
+        kind = str(task.get("kind") or "")
+        with self.lock:
+            if kind == "category":
+                return self.bridge.category_quotes(
+                    int(task.get("category") or 6),
+                    int(task.get("sortType") or 0),
+                    int(task.get("start") or 0),
+                    int(task.get("count") or 80),
+                    bool(task.get("ascending")),
+                )
+            if kind == "ticks":
+                return self.bridge.trades(
+                    str(task.get("code") or ""),
+                    int(task.get("start") or 0),
+                    int(task.get("count") or 60),
+                    task.get("date") or None,
+                )
+            if kind == "auction":
+                return self.bridge.auctions(
+                    str(task.get("code") or ""), task.get("date") or None
+                )
+            if kind == "moneyFlow":
+                code = str(task.get("code") or "")
+                return {
+                    "flow": self.bridge.money_flow(code),
+                    "mac": self.bridge.mac_money_flow(code),
+                }
+            if kind == "kline":
+                return self.bridge.kline_live(
+                    str(task.get("code") or ""),
+                    str(task.get("period") or "day"),
+                    int(task.get("count") or 800),
+                    str(task.get("adjust") or "qfq"),
+                    bool(first),
+                )
+            if kind == "minute":
+                return self.bridge.minute_cached(str(task.get("code") or ""), fresh=True)
+            if kind == "fiveDay":
+                return self.bridge.five_day_cached(str(task.get("code") or ""), fresh=True)
+        raise TdxError(f"未知推送任务：{kind}")
+
+    def publish_progress(self, progress: dict) -> None:
+        """把备份/恢复进度扇出给所有 SSE 客户端。"""
+        with self.progress_lock:
+            clients = list(self.progress_clients)
+        for client in clients:
+            try:
+                client.put_nowait(progress)
+            except queue.Full:
+                # 慢客户端：丢最旧一帧，保证它看到的是最新进度。
+                try:
+                    client.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    client.put_nowait(progress)
+                except queue.Full:
+                    pass
+
+    def register_progress_client(self) -> queue.Queue[dict]:
+        client: queue.Queue[dict] = queue.Queue(maxsize=32)
+        with self.progress_lock:
+            self.progress_clients.add(client)
+        return client
+
+    def unregister_progress_client(self, client: queue.Queue[dict]) -> None:
+        with self.progress_lock:
+            self.progress_clients.discard(client)
 
     def market_breadth(self) -> dict:
         """全市场涨跌家数：Bridge 负责缓存/跨日失效，服务端只负责分步扫描。
@@ -108,6 +189,10 @@ class TdxApiServer(ThreadingHTTPServer):
             self.hub.close()
         except Exception:  # noqa: BLE001 - 关闭阶段不因清理失败而中断
             pass
+        try:
+            self.push.close()
+        except Exception:  # noqa: BLE001
+            pass
         super().server_close()
 
 
@@ -129,6 +214,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         "/api/offline_sync_cancel",
         "/api/backup_create",
         "/api/backup_restore",
+        "/api/push_subscribe",
+        "/api/push_unsubscribe",
         "/api/server_catalog",
         "/api/local_import",
         "/api/stats_summary",
@@ -171,9 +258,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _ws_read(self) -> tuple[int, bytes]:
-        header = self.connection.recv(2)
-        if len(header) < 2:
-            raise ConnectionResetError("websocket closed")
+        # recv(2) 不保证一次拿满 2 字节：TCP 分段时只收到 1 字节就当成断连，
+        # 会让 WS 客户端随机掉线。帧头必须凑满。
+        header = self._recv_exact(2)
         first, second = header[0], header[1]
         if not (first & 0x80):
             raise ValueError("fragmented frames are not supported")
@@ -310,6 +397,69 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _ok(self, result: Any) -> None:
         self._json(HTTPStatus.OK, {"ok": True, "result": result})
 
+    def _push_stream(self, client_id: str) -> None:
+        """面板级推送 SSE：客户端连接后按 client id 订阅任务，断开时全部回收。"""
+        if not client_id:
+            self._error(HTTPStatus.BAD_REQUEST, "push 需要 client")
+            return
+        stream = self.server.push.register_client(client_id)
+        # 登记之后连写响应头都可能失败（浏览器刚打开就关页签）：整段放进 try，
+        # 否则队列不会回收，后续同名 client 会读到别人的旧队列。
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self._cors()
+            self.end_headers()
+            self.close_connection = True
+            while True:
+                try:
+                    payload = stream.get(timeout=15)
+                except queue.Empty:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    continue
+                self.wfile.write(
+                    f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+                )
+                self.wfile.flush()
+        except ConnectionError:
+            return
+        finally:
+            self.server.push.unregister_client(client_id)
+            self.close_connection = True
+
+    def _progress_stream(self) -> None:
+        """备份/恢复进度的 SSE 流；断开时自动注销，不泄漏队列。"""
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self._cors()
+        self.end_headers()
+        self.close_connection = True
+        client = self.server.register_progress_client()
+        try:
+            while True:
+                try:
+                    progress = client.get(timeout=15)
+                except queue.Empty:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    continue
+                self.wfile.write(
+                    f"data: {json.dumps(progress, ensure_ascii=False)}\n\n".encode("utf-8")
+                )
+                self.wfile.flush()
+        except ConnectionError:
+            return
+        finally:
+            self.server.unregister_progress_client(client)
+            self.close_connection = True
+
     def _stream(self, query: dict[str, str]) -> None:
         """SSE 行情流：先落地推送语义，避免 Web 端只能 3 秒轮询。"""
         codes = [
@@ -358,7 +508,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     )
                 )
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             return
         finally:
             self.server.hub.unsubscribe(subscription)
@@ -405,7 +555,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         try:
             self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             pass
 
     def _body(self) -> dict[str, Any]:
@@ -438,6 +588,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/stream":
                 self._stream(query)
+                return
+            if parsed.path == "/api/progress":
+                self._progress_stream()
+                return
+            if parsed.path == "/api/push":
+                self._push_stream(str(query.get("client") or ""))
                 return
             if parsed.path == "/api/ping":
                 self._ok("pong")
@@ -1576,6 +1732,50 @@ class ApiHandler(BaseHTTPRequestHandler):
                 with self.server.lock:
                     self._ok(self.server.bridge.archive_snapshot())
                 return
+            if parsed.path == "/api/archive_datasets":
+                with self.server.lock:
+                    self._ok(
+                        self.server.bridge.archive_datasets(list(payload.get("codes") or []))
+                    )
+                return
+            if parsed.path == "/api/push_subscribe":
+                client_id = str(payload.get("client") or "")
+                task = payload.get("task")
+                if not client_id or not isinstance(task, dict):
+                    raise TdxError("push_subscribe 需要 client 和 task")
+                sub_id = self.server.push.subscribe(
+                    client_id,
+                    task,
+                    int(payload.get("intervalMs") or 3000),
+                    int(payload["id"]) if payload.get("id") is not None else None,
+                )
+                self._ok({"id": sub_id})
+                return
+            if parsed.path == "/api/push_unsubscribe":
+                self.server.push.unsubscribe(
+                    str(payload.get("client") or ""), int(payload.get("id") or 0)
+                )
+                self._ok(True)
+                return
+            if parsed.path == "/api/backup_create":
+                self._ok(
+                    backup_create(
+                        str(payload.get("path") or ""),
+                        progress=self.server.publish_progress,
+                    )
+                )
+                return
+            if parsed.path == "/api/backup_inspect":
+                self._ok(backup_inspect(str(payload.get("path") or "")))
+                return
+            if parsed.path == "/api/backup_restore":
+                self._ok(
+                    backup_restore(
+                        str(payload.get("path") or ""),
+                        progress=self.server.publish_progress,
+                    )
+                )
+                return
             if parsed.path == "/api/export_klines":
                 with self.server.lock:
                     self._ok(
@@ -1887,15 +2087,31 @@ def create_server(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="pythontdx 只读 HTTP 行情 API")
+    # 打包后的服务器同时是离线同步 worker 的宿主：offline_sync 会用同一个
+    # 可执行文件带 --offline-worker 起子进程。桌面端只打包这一份 Python 程序，
+    # 不再有单独的 stdio sidecar。
+    if "--offline-worker" in sys.argv:
+        from offline_sync import run_worker
+
+        index = sys.argv.index("--offline-worker")
+        if index + 1 >= len(sys.argv):
+            raise SystemExit("--offline-worker 缺少分片路径")
+        run_worker(sys.argv[index + 1])
+        return
+
+    parser = argparse.ArgumentParser(description="pythontdx 本地 HTTP 行情服务")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--web-dir", default=None, help="可选：托管 out/web 静态产物")
+    # 兼容旧启动参数：桌面壳用它显式声明「以服务器模式运行」，当前无需分支。
+    parser.add_argument("--serve", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     server = create_server(args.host, args.port, web_dir=args.web_dir)
     print(f"[api] listening on http://{args.host}:{server.server_port}", file=sys.stderr)
     if server.web_dir is not None:
         print(f"[api] serving web from {server.web_dir}", file=sys.stderr)
+    # 端口 0 由系统分配；Electron 主进程读这一行拿到真实端口，避免固定端口冲突。
+    print(f"PYTHONTDX_PORT={server.server_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

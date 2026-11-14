@@ -220,8 +220,10 @@ export function buildTrendGeometry(
  * 保证「波动 0.8% 的股票也能看清细节」；多日模式没有统一基准，改用价格刻度。
  */
 export function buildTrendLevels(days: MinuteTrend[], geo: TrendGeometry): AxisLevel[] {
+  // 刻度数跟着图高走：700 高的窗口里 12 条会糊成一团，短窗口自动降到 4~6 条。
+  const target = Math.max(3, Math.min(12, Math.floor(geo.height / 46)))
   if (days.length > 1) {
-    const step = niceAxisStep(geo.yMax - geo.yMin, 12)
+    const step = niceAxisStep(geo.yMax - geo.yMin, target)
     const result: AxisLevel[] = []
     for (let value = Math.ceil(geo.yMin / step) * step; value <= geo.yMax; value += step) {
       result.push({ value: Number(value.toFixed(3)), pct: null })
@@ -233,9 +235,9 @@ export function buildTrendLevels(days: MinuteTrend[], geo: TrendGeometry): AxisL
   if (!(base > 0)) return []
 
   const rangePct = ((geo.yMax - geo.yMin) / base) * 100
-  // 右侧百分比刻度要密一些：目标约 8 条，同时避免 0.05% 这类过细标签。
+  // 右侧百分比刻度要密一些：目标约 target 条，同时避免 0.05% 这类过细标签。
   const candidates = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20]
-  const step = candidates.find((value) => value >= rangePct / 14) ?? 20
+  const step = candidates.find((value) => value >= rangePct / (target + 2)) ?? 20
 
   // 基准线一定在
   const result: AxisLevel[] = [{ value: base, pct: 0 }]

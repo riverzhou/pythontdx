@@ -34,6 +34,7 @@ export default tseslint.config(
       'release/**',
       'node_modules/**',
       'screenshots/**',
+      '.tmp/**',
       'build/**',
       'resources/**',
       'scripts/**/*.cjs',

@@ -173,8 +173,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           PKG_VERSION=$(node -p "require('./package.json').version")
           test "$VERSION" = "$PKG_VERSION"
-          if [ -f "RELEASE_NOTES-$VERSION.md" ]; then
-            cp "RELEASE_NOTES-$VERSION.md" .release-notes.md
+          if [ -f "docs/releases/$VERSION.md" ]; then
+            cp "docs/releases/$VERSION.md" .release-notes.md
           else
             printf '# pythontdx %s\n\nBinaries are attached below.\n' "$VERSION" > .release-notes.md
           fi

@@ -9,7 +9,7 @@
  *   gn/fg/zs/general → 0x06b9 的 block_*.dat
  */
 import type { BlockGroup, BlockKind, IndustryList } from '@shared/types'
-import { api } from './ipc'
+import { api } from './client'
 
 export type BoardCategory = 'rs1' | 'rs2' | 'industry' | BlockKind
 

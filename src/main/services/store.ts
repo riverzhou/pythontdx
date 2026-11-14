@@ -27,6 +27,8 @@ export interface WindowBounds {
   y?: number
   width: number
   height: number
+  /** 上次退出时是否最大化；旧存档没有这个字段，按「首次启动」处理 */
+  maximized?: boolean
 }
 
 /** v1 的旧结构：自选股是一个扁平数组，没有分组 */
@@ -42,7 +44,17 @@ interface PersistedFile {
   window?: WindowBounds
   secondaryWindow?: WindowBounds
   chartWindow?: WindowBounds
+  /** 窗口默认尺寸的迁移版本：老存档做一次性重置，见 DEFAULT_WINDOW */
+  windowSizeVersion?: number
 }
+
+/**
+ * 1.8.0 期间调整过窗口默认值（1600×1000 → 1440×900，并改为最大化启动）。
+ * 老存档里可能存着旧默认或测出来的尺寸，这里做一次性重置：
+ * 「还原」统一回到 1440×900，方便按最低支持分辨率验收。
+ */
+const WINDOW_SIZE_VERSION = 1
+const DEFAULT_WINDOW: WindowBounds = { width: 1440, height: 900 }
 
 const SAVE_DEBOUNCE_MS = 150
 
@@ -100,12 +112,18 @@ export class AppStore {
     if (!existsSync(this.filePath)) return
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, 'utf-8')) as Partial<PersistedFile>
+      // 一次性把窗口尺寸重置到 1440×900（保留是否最大化的记忆）
+      const window =
+        parsed.windowSizeVersion === WINDOW_SIZE_VERSION
+          ? parsed.window
+          : { ...DEFAULT_WINDOW, maximized: parsed.window?.maximized }
       this.data = {
         version: STATE_VERSION,
         state: this.mergeState(parsed.state),
-        window: parsed.window,
+        window,
         secondaryWindow: parsed.secondaryWindow,
-        chartWindow: parsed.chartWindow
+        chartWindow: parsed.chartWindow,
+        windowSizeVersion: WINDOW_SIZE_VERSION
       }
     } catch (error) {
       // 文件损坏时不要炸掉整个 App，退回默认值并留个日志

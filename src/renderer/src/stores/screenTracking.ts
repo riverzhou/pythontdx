@@ -5,7 +5,7 @@
  */
 import { createEffect, createSignal } from 'solid-js'
 import type { ScreenPreset } from '@shared/types'
-import { api } from '../lib/ipc'
+import { api } from '../lib/client'
 import { appState, replaceGroupItems } from './app'
 
 const INTERVAL_MS = 60_000

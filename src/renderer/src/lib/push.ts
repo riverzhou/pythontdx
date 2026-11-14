@@ -1,11 +1,11 @@
 import type { PushTask, PushUpdate } from '@shared/types'
-import { api } from './ipc'
+import { api } from './client'
 
 /**
  * 面板级推送订阅。
  *
- * 组件只声明「要什么」，主进程按任务调度并推回；返回的清理函数会同时
- * 取消 IPC 监听和主进程订阅，切 tab/卸载不会留下孤儿定时器。
+ * 组件只声明「要什么」，`http-api` 的统一适配器按任务调度并回调；
+ * 返回的清理函数会取消订阅，切 tab/卸载不会留下孤儿定时器。
  */
 export function subscribePush<T>(
   task: PushTask,

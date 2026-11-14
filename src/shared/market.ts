@@ -284,8 +284,8 @@ export const IDLE_POLL_SCALE = 10
 /**
  * 行情轮询的有效间隔。
  *
- * 桌面 QuotePoller 与 Web 轮询降级共用这一条规则；Web 的 SSE/WS 在
- * Python 侧另有一份同规则实现（`_quote_interval`），两处测试锁住。
+ * 渲染层轮询降级用这一条规则；Python 的 SSE/WS 调度另有一份同规则实现
+ * （`_quote_interval`），两处测试锁住。
  */
 export function pollDelayMs(intervalMs: number, now: Date = new Date()): number {
   const requested = Math.max(1000, Math.trunc(intervalMs) || 3000)

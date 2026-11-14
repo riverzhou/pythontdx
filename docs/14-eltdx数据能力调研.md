@@ -1,4 +1,4 @@
-# 13 · eltdx 数据能力调研（2026-11-04）
+# 14 · eltdx 数据能力调研（2026-11-04）
 
 > **2026-11-04 追加更正**：本文是最初的快速调研，部分结论已被源码级审计推翻，
 > 以 [docs/17](17-eltdx协议差距与补齐清单.md) 为准。主要偏差：
@@ -108,7 +108,7 @@ GPL-3.0-or-later 不兼容；不能复制源码、夹具、文档，也不能把
 
 ```bash
 python -c "import eltdx"  # 未安装：ModuleNotFoundError
-PYTHONPATH=python python -m pytest python/test_local.py python/test_tdx.py -q  # 78 passed
+PYTHONPATH=python python -m pytest python/tests/test_local.py python/tests/test_tdx.py -q  # 78 passed
 ```
 
 后续联网验证（临时目录，不影响用户数据）：

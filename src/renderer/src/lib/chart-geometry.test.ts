@@ -235,6 +235,16 @@ describe('buildTrendLevels', () => {
     expect(levels.length).toBeGreaterThanOrEqual(5)
   })
 
+  it('短窗口仍能生成刻度且不越界', () => {
+    const short = buildTrendGeometry(ONE_DAY, 800, 200)!
+    const levels = buildTrendLevels(ONE_DAY, short)
+    expect(levels.length).toBeGreaterThanOrEqual(3)
+    for (const level of levels) {
+      expect(level.value).toBeGreaterThanOrEqual(short.yMin - 1e-9)
+      expect(level.value).toBeLessThanOrEqual(short.yMax + 1e-9)
+    }
+  })
+
   it('单日：围绕基准线上下成对出现', () => {
     const geo = buildTrendGeometry(ONE_DAY, 800, 400)!
     const levels = buildTrendLevels(ONE_DAY, geo)

@@ -1,0 +1,92 @@
+/* ============================================================================
+   列表表格的公共细节
+   - 表头 sticky：纵向滚动时列名始终可见（行情列表动辄几百行）
+   - 走势列吸收剩余宽度，迷你图铺满，右侧留一点呼吸位
+   - 「+」这类下拉面板按内容收紧，避免中间出现大片留白
+   ========================================================================== */
+
+.market__table thead th,
+.ranking__table thead th,
+.block__table thead th,
+.screener__table thead th,
+.mreport__table thead th,
+.portfolio-table thead th,
+.unusual__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel-solid);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.market__table .market__spark-cell,
+.ranking__table .ranking__spark-cell,
+.block__table .block__spark-cell {
+  /* 三张表统一：右侧只留 2px，走势线贴右但不贴框 */
+  padding-right: 2px;
+  padding-left: 4px;
+}
+
+.market__spark-cell .sparkline,
+.ranking__spark-cell .sparkline,
+.block__spark-cell .sparkline {
+  width: 100%;
+  height: 20px;
+  display: block;
+  margin-left: auto;
+  margin-right: 0;
+}
+
+/* 「+」那种长菜单：宽度跟内容走，label 与 hint 之间只留 12px */
+.menu__panel--portal {
+  width: max-content;
+  min-width: 150px;
+  max-width: 280px;
+}
+
+.menu__panel--portal .menu__item {
+  gap: 12px;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+/*
+ * 1920 档：把数据列统一放宽，原本堆在列表右侧的空白摊回列里。
+ * 名称列与走势列保持原宽，保证名称不空、走势图贴边。
+ * 阈值取 1900：三张表放宽后的列宽和在这个宽度下仍能放下，不会横向滚动。
+ */
+@media (min-width: 1900px) {
+  .market__table colgroup col:nth-child(1),
+  .market__table colgroup col:nth-child(n + 3):nth-child(-n + 19) {
+    width: 80px !important;
+  }
+
+  .ranking__table colgroup col:nth-child(1) {
+    width: 40px !important;
+  }
+
+  .ranking__table colgroup col:nth-child(2),
+  .ranking__table colgroup col:nth-child(n + 4):nth-child(-n + 20) {
+    width: 80px !important;
+  }
+
+  .block__table colgroup col:nth-child(1),
+  .block__table colgroup col:nth-child(n + 3):nth-child(-n + 19) {
+    width: 72px !important;
+  }
+}
+
+/*
+ * 所有列表表格右侧统一不留外边距：表格右缘贴容器，最后的留白只由
+ * 走势单元格自身的 2px padding 提供，这样三张带走势的表看起来完全一致。
+ */
+.market__table-wrap,
+.ranking__table-wrap,
+.block__table-wrap,
+.screener__table-wrap,
+.mreport__table-wrap,
+.portfolio__table-wrap,
+.unusual__table-wrap,
+.dragon__table-wrap {
+  padding-right: 0;
+}

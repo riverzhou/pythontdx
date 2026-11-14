@@ -1,8 +1,11 @@
 /**
- * 应用根组件：负责布局、主题注入和行情订阅的启动。
+ * 应用根组件：主工作区标签页 + 三栏布局。
  *
- * 布局用 CSS Grid 划成「标题栏 / 侧栏 + 工作区 / 状态栏」三块，
- * 这里只做结构，具体样式在 styles/app.css。
+ * 页面逻辑（2026-11-14 重整）：
+ *   · 行情相关的显示（排行榜、板块、全市场、多股同列、选股、复盘、组合、
+ *     预警、龙虎榜、异动、大盘资料、自选行情墙）全部是工作区标签页；
+ *   · 只有设置、数据、F10/公告、公式/指标编辑器、服务器、快捷键是弹窗；
+ *   · 左栏始终是自选/板块/自定义，右栏只在「行情」标签出现。
  */
 import {
   createEffect,
@@ -15,40 +18,42 @@ import {
   type JSX
 } from 'solid-js'
 import type { Quote } from '@shared/types'
-import { AlertPanel } from './components/AlertPanel'
-import { AlertToast } from './components/AlertToast'
-import { AuctionTape } from './components/AuctionTape'
-import { BlockPanel } from './components/BlockPanel'
-import { ChartPanel } from './components/ChartPanel'
-import { AnnouncementsPanel } from './components/AnnouncementsPanel'
-import { DataPanel } from './components/DataPanel'
-import { EmptyState } from './components/EmptyState'
-import { F10Panel } from './components/F10Panel'
-import { FormulaPanel } from './components/FormulaPanel'
-import { IndicatorPanel } from './components/IndicatorPanel'
-import { MoneyFlow } from './components/MoneyFlow'
-import { MultiStockPanel } from './components/MultiStockPanel'
-import { OrderBook } from './components/OrderBook'
-import { QuoteHeader } from './components/QuoteHeader'
-import { RankingPanel } from './components/RankingPanel'
-import { ReplayPanel } from './components/ReplayPanel'
-import { ScreenerPanel } from './components/ScreenerPanel'
-import { Sidebar } from './components/Sidebar'
-import { WatchlistFullscreen } from './components/WatchlistFullscreen'
-import { StatsGrid } from './components/StatsGrid'
-import { StatusBar } from './components/StatusBar'
-import { TitleBar } from './components/TitleBar'
-import { TradeTape } from './components/TradeTape'
-import { PriceDistribution } from './components/PriceDistribution'
-import { SettingsPanel } from './components/SettingsPanel'
-import { ServerWindow } from './components/ServerWindow'
-import { PortfolioPanel } from './components/PortfolioPanel'
-import { MarketListPanel } from './components/MarketListPanel'
-import { UnusualPanel } from './components/UnusualPanel'
-import { DragonPanel } from './components/DragonPanel'
-import { MarketReportPanel } from './components/MarketReportPanel'
-import { ShortcutsPanel } from './components/ShortcutsPanel'
-import { StockMenu } from './components/StockMenu'
+import { AlertPanel } from './components/panels/AlertPanel'
+import { AlertToast } from './components/atoms/AlertToast'
+import { AnnouncementsPanel } from './components/panels/AnnouncementsPanel'
+import { AuctionTape } from './components/atoms/AuctionTape'
+import { BlockPanel } from './components/panels/BlockPanel'
+import { ChartPanel } from './components/panels/ChartPanel'
+import { DataPanel } from './components/panels/DataPanel'
+import { DragonPanel } from './components/panels/DragonPanel'
+import { EmptyState } from './components/atoms/EmptyState'
+import { F10Panel } from './components/panels/F10Panel'
+import { FormulaPanel } from './components/panels/FormulaPanel'
+import { IndicatorPanel } from './components/panels/IndicatorPanel'
+import { MarketListPanel } from './components/panels/MarketListPanel'
+import { MarketReportPanel } from './components/panels/MarketReportPanel'
+import { MoneyFlow } from './components/atoms/MoneyFlow'
+import { MultiStockPanel } from './components/panels/MultiStockPanel'
+import { OrderBook } from './components/atoms/OrderBook'
+import { PortfolioPanel } from './components/panels/PortfolioPanel'
+import { PriceDistribution } from './components/atoms/PriceDistribution'
+import { QuoteHeader } from './components/atoms/QuoteHeader'
+import { RankingPanel } from './components/panels/RankingPanel'
+import { ReplayPanel } from './components/panels/ReplayPanel'
+import { ScreenerPanel } from './components/panels/ScreenerPanel'
+import { SectorPicker } from './components/atoms/SectorPicker'
+import { ServerWindow } from './components/atoms/ServerWindow'
+import { SettingsPanel } from './components/panels/SettingsPanel'
+import { ShortcutsPanel } from './components/panels/ShortcutsPanel'
+import { Sidebar } from './components/chrome/Sidebar'
+import { StatsGrid } from './components/atoms/StatsGrid'
+import { StatusBar } from './components/chrome/StatusBar'
+import { StockMenu } from './components/atoms/StockMenu'
+import { TitleBar } from './components/chrome/TitleBar'
+import { TradeTape } from './components/atoms/TradeTape'
+import { UnusualPanel } from './components/panels/UnusualPanel'
+import { WatchlistFullscreen } from './components/atoms/WatchlistFullscreen'
+import { WorkspaceTabs } from './components/chrome/WorkspaceTabs'
 import {
   activeQuoteCode,
   appInfo,
@@ -56,12 +61,11 @@ import {
   appState,
   bootstrapAppState,
   initWindowSync,
-  setActiveCode,
+  startAutoArchive,
+  startMarketCalendar,
   toggleTheme,
   updateSettings,
-  watchCodes,
-  startAutoArchive,
-  startMarketCalendar
+  watchCodes
 } from './stores/app'
 import {
   applyQuotes,
@@ -70,39 +74,43 @@ import {
   quoteOf,
   refreshQuotes
 } from './stores/quotes'
-import { api } from './lib/ipc'
+import { api, shell } from './lib/client'
 import { createSparklineLoader } from './stores/sparklines'
 import { dismissLatestAlert, hydrateAlertEvents, latestAlert } from './stores/alerts'
 import { startScreenTracking } from './stores/screenTracking'
 import { startClock } from './stores/clock'
+import { trackSector } from './stores/sector'
+import {
+  activeView,
+  closePopup,
+  closeView,
+  openPopup,
+  openView,
+  popup,
+  selectStock,
+  togglePopup
+} from './stores/workspace'
+
+const COMMANDS: Record<string, 'ranking' | 'market' | 'dragon'> = {
+  '60': 'ranking',
+  '63': 'market',
+  '77': 'dragon'
+}
 
 export default function App(): JSX.Element {
-  const [rankingOpen, setRankingOpen] = createSignal(false)
-  const [blocksOpen, setBlocksOpen] = createSignal(false)
-  const [screenerOpen, setScreenerOpen] = createSignal(false)
-  const [replayOpen, setReplayOpen] = createSignal(false)
-  const [formulaOpen, setFormulaOpen] = createSignal(false)
-  const [indicatorOpen, setIndicatorOpen] = createSignal(false)
-  const [settingsOpen, setSettingsOpen] = createSignal(false)
-  const [serversOpen, setServersOpen] = createSignal(false)
-  const [shortcutsOpen, setShortcutsOpen] = createSignal(false)
-  const [portfolioOpen, setPortfolioOpen] = createSignal(false)
-  const [marketOpen, setMarketOpen] = createSignal(false)
-  const [unusualOpen, setUnusualOpen] = createSignal(false)
-  const [dragonOpen, setDragonOpen] = createSignal(false)
-  const [marketReportOpen, setMarketReportOpen] = createSignal(false)
-  const [f10Open, setF10Open] = createSignal(false)
-  const [announcementsOpen, setAnnouncementsOpen] = createSignal(false)
-  const [multiOpen, setMultiOpen] = createSignal(false)
-  const [fullWatchlistOpen, setFullWatchlistOpen] = createSignal(false)
-  const [dataOpen, setDataOpen] = createSignal(false)
-  const [alertsOpen, setAlertsOpen] = createSignal(false)
   const [railTab, setRailTab] = createSignal<'tape' | 'stats' | 'price' | 'flow' | 'auction'>(
     'tape'
   )
   const [widths, setWidths] = createSignal<{ sidebar: number; rail: number } | null>(null)
   const [liveStarted, setLiveStarted] = createSignal(false)
   let stopResize: (() => void) | null = null
+  let commandBuffer = ''
+  let commandTimer: ReturnType<typeof setTimeout> | undefined
+
+  const pickQuote = (quote: Quote): void => {
+    applyQuotes([quote])
+    selectStock(quote.code)
+  }
 
   onMount(() => {
     // 行情推送晚 250ms 起步：把桥接队列先让给图表缓存和逐笔归档，
@@ -118,23 +126,39 @@ export default function App(): JSX.Element {
     startAutoArchive()
     startMarketCalendar()
     initWindowSync()
+
+    const runCommand = (command: string): void => {
+      const view = COMMANDS[command]
+      if (view) openView(view)
+    }
+    const pushCommandDigit = (digit: string): void => {
+      commandBuffer += digit
+      if (commandBuffer.length > 2) commandBuffer = commandBuffer.slice(-2)
+      if (commandTimer) clearTimeout(commandTimer)
+      commandTimer = setTimeout(() => {
+        commandBuffer = ''
+      }, 700)
+      if (COMMANDS[commandBuffer]) {
+        runCommand(commandBuffer)
+        commandBuffer = ''
+      }
+    }
+
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!appReady() || event.metaKey || event.ctrlKey || event.altKey) return
-      if (event.key === 'F11') {
-        event.preventDefault()
-        if (appInfo()?.platform === 'web') {
-          if (document.fullscreenElement) void document.exitFullscreen()
-          else void document.documentElement.requestFullscreen()
-        } else {
-          void api.window.control('toggle-fullscreen')
+
+      if (event.key === 'Escape') {
+        if (popup()) {
+          closePopup()
+          return
+        }
+        if (activeView() !== 'chart') {
+          closeView(activeView())
+          return
         }
         return
       }
-      if (event.key === 'F10') {
-        event.preventDefault()
-        setF10Open((value) => !value)
-        return
-      }
+
       const target = event.target as HTMLElement | null
       if (
         target instanceof HTMLInputElement ||
@@ -144,24 +168,83 @@ export default function App(): JSX.Element {
       ) {
         return
       }
+
+      if (event.key === 'F11') {
+        event.preventDefault()
+        if (appInfo()?.platform === 'web') {
+          if (document.fullscreenElement) void document.exitFullscreen()
+          else void document.documentElement.requestFullscreen()
+        } else {
+          void shell.window.control('toggle-fullscreen')
+        }
+        return
+      }
+      if (event.key === 'F10') {
+        event.preventDefault()
+        if (activeQuoteCode()) togglePopup('f10')
+        return
+      }
+      if (event.key === 'F3') {
+        event.preventDefault()
+        selectStock('sh000001')
+        return
+      }
+      if (event.key === 'F4') {
+        event.preventDefault()
+        selectStock('sz399001')
+        return
+      }
+      if (event.key === 'F5') {
+        event.preventDefault()
+        if (activeView() !== 'chart') openView('chart')
+        else window.dispatchEvent(new CustomEvent('pythontdx:chart-toggle'))
+        return
+      }
+      if (event.key === 'F6') {
+        event.preventDefault()
+        openView('chart')
+        return
+      }
+      if (event.key === 'F7') {
+        event.preventDefault()
+        if (activeQuoteCode()) openPopup('announcements')
+        return
+      }
+      if (event.key === 'F9') {
+        event.preventDefault()
+        openView('screener')
+        return
+      }
+
       if (event.key === '/') {
         event.preventDefault()
         document.querySelector<HTMLInputElement>('.search__input')?.focus()
-      } else if (event.key === 'r' || event.key === 'R') {
+        return
+      }
+      if (event.key === 'r' || event.key === 'R') {
         event.preventDefault()
-        void refreshQuotes(quoteCodes())
-      } else if (event.key === 't' || event.key === 'T') {
+        void refreshQuotes(watchCodes())
+        return
+      }
+      if (event.key === 't' || event.key === 'T') {
         event.preventDefault()
         toggleTheme()
-      } else if (event.key === '?') {
+        return
+      }
+      if (event.key === '?') {
         event.preventDefault()
-        setShortcutsOpen((value) => !value)
-      } else if (event.key === 'Escape' && shortcutsOpen()) {
-        setShortcutsOpen(false)
+        openPopup('shortcuts')
+        return
+      }
+      if (/^[0-9]$/.test(event.key)) {
+        pushCommandDigit(event.key)
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    onCleanup(() => window.removeEventListener('keydown', onKeyDown))
+    onCleanup(() => {
+      window.removeEventListener('keydown', onKeyDown)
+      if (commandTimer) clearTimeout(commandTimer)
+    })
   })
 
   // 主题：把设置写进 <html data-theme>，CSS 变量会自动切换
@@ -246,345 +329,323 @@ export default function App(): JSX.Element {
       '--rail-w': `${currentWidths().rail}px`
     }) as JSX.CSSProperties
 
+  const missingQuote = (view: string): JSX.Element => (
+    <div class="view-empty">
+      <div class="view-empty__title">{view}需要先选一只股票</div>
+      <div class="view-empty__hint">从左侧自选或「报价」菜单里选一只股票后再打开。</div>
+      <button class="btn" onClick={() => closeView(activeView())}>
+        返回行情
+      </button>
+    </div>
+  )
+
   return (
     <div
       class="app"
       classList={{
-        'app--empty': !activeQuote(),
-        'app--sidebar-hidden': appState.settings.sidebarHidden === true
+        'app--empty': !activeQuote() && activeView() === 'chart',
+        'app--sidebar-hidden': appState.settings.sidebarHidden === true,
+        'app--view': activeView() !== 'chart'
       }}
       style={appStyle()}
     >
-      <TitleBar
-        onOpenData={() => setDataOpen(true)}
-        onOpenUnusual={() => setUnusualOpen(true)}
-        onOpenDragon={() => setDragonOpen(true)}
-        onOpenAlerts={() => setAlertsOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenServers={() => setServersOpen(true)}
-        sidebarHidden={appState.settings.sidebarHidden === true}
-        onToggleSidebar={() =>
-          updateSettings({ sidebarHidden: !(appState.settings.sidebarHidden === true) })
-        }
-      />
-      <Show when={appState.settings.sidebarHidden === true}>
-        <button
-          class="sidebar-reveal"
-          title="展开自选栏"
-          onClick={() => updateSettings({ sidebarHidden: false })}
-        >
-          自选 »
-        </button>
-      </Show>
-      <Sidebar
-        onOpenRanking={() => setRankingOpen(true)}
-        onOpenBlocks={() => setBlocksOpen(true)}
-        onOpenScreener={() => setScreenerOpen(true)}
-        onOpenMulti={() => setMultiOpen(true)}
-        onOpenPortfolio={() => setPortfolioOpen(true)}
-        onOpenMarket={() => setMarketOpen(true)}
-        onOpenFullWatchlist={() => setFullWatchlistOpen(true)}
-      />
+      <TitleBar />
+      <Sidebar />
 
-      {/* 主区只有两块：行情头部 + 图表。图表用 flex 吃掉全部剩余高度 */}
       <main class="workspace">
-        <Show when={activeQuote()} fallback={<EmptyState />}>
-          {(quote) => (
-            <>
-              <QuoteHeader
-                quote={quote()}
-                onOpenF10={() => setF10Open(true)}
-                onOpenAnnouncements={() => setAnnouncementsOpen(true)}
-              />
-              <ChartPanel
-                code={quote().code}
-                onOpenReplay={() => setReplayOpen(true)}
-                onOpenFormula={() => setFormulaOpen(true)}
-                onOpenIndicators={() => setIndicatorOpen(true)}
-                onChartTabChange={(next) => {
-                  if (next === 'minute' || next === 'five') setRailTab('tape')
+        <WorkspaceTabs />
+        <div class="workspace__body">
+          <Switch
+            fallback={
+              <Show when={activeQuote()} fallback={<EmptyState />}>
+                {(quote) => (
+                  <>
+                    <QuoteHeader quote={quote()} />
+                    <ChartPanel
+                      code={quote().code}
+                      onChartTabChange={(next) => {
+                        if (next === 'minute' || next === 'five') setRailTab('tape')
+                      }}
+                    />
+                  </>
+                )}
+              </Show>
+            }
+          >
+            <Match when={activeView() === 'ranking'}>
+              <RankingPanel
+                embedded
+                onClose={() => closeView('ranking')}
+                onSelect={(quote) => {
+                  pickQuote(quote)
                 }}
               />
-            </>
-          )}
-        </Show>
+            </Match>
+            <Match when={activeView() === 'blocks'}>
+              <BlockPanel
+                embedded
+                onClose={() => closeView('blocks')}
+                onSelect={(quote) => pickQuote(quote)}
+              />
+            </Match>
+            <Match when={activeView() === 'sector'}>
+              <SectorPicker
+                embedded
+                onClose={() => closeView('sector')}
+                onPick={(selection) => {
+                  trackSector(selection)
+                  closeView('sector')
+                }}
+              />
+            </Match>
+            <Match when={activeView() === 'market'}>
+              <MarketListPanel
+                embedded
+                onClose={() => closeView('market')}
+                onSelect={(quote) => pickQuote(quote)}
+                onOpenBlocks={() => openView('blocks')}
+              />
+            </Match>
+            <Match when={activeView() === 'screener'}>
+              <ScreenerPanel
+                embedded
+                onClose={() => closeView('screener')}
+                onSelect={(quote) => pickQuote(quote)}
+              />
+            </Match>
+            <Match when={activeView() === 'multi'}>
+              <MultiStockPanel
+                embedded
+                onClose={() => closeView('multi')}
+                onSelect={(code) => selectStock(code)}
+              />
+            </Match>
+            <Match when={activeView() === 'watch'}>
+              <WatchlistFullscreen
+                embedded
+                onClose={() => closeView('watch')}
+                onSelect={(code) => selectStock(code)}
+              />
+            </Match>
+            <Match when={activeView() === 'tape'}>
+              <Show when={activeQuote()} fallback={missingQuote('逐笔明细')}>
+                {(quote) => (
+                  <div class="view-shell">
+                    <header class="view-shell__head">
+                      <span class="view-shell__title">
+                        逐笔成交 · {quote().name}{' '}
+                        <span class="num view-shell__code">{quote().code.toUpperCase()}</span>
+                      </span>
+                      <button
+                        class="btn btn--icon btn--bare"
+                        title="关闭逐笔明细"
+                        onClick={() => closeView('tape')}
+                      >
+                        ×
+                      </button>
+                    </header>
+                    <div class="view-shell__body">
+                      <TradeTape code={quote().code} showExpand={false} variant="board" />
+                    </div>
+                  </div>
+                )}
+              </Show>
+            </Match>
+            <Match when={activeView() === 'portfolio'}>
+              <PortfolioPanel
+                embedded
+                onClose={() => closeView('portfolio')}
+                onSelect={(quote) => selectStock(quote.code)}
+              />
+            </Match>
+            <Match when={activeView() === 'report'}>
+              <MarketReportPanel embedded onClose={() => closeView('report')} />
+            </Match>
+            <Match when={activeView() === 'dragon'}>
+              <DragonPanel
+                embedded
+                onClose={() => closeView('dragon')}
+                onSelect={(code) => selectStock(code)}
+              />
+            </Match>
+            <Match when={activeView() === 'unusual'}>
+              <UnusualPanel
+                embedded
+                onClose={() => closeView('unusual')}
+                onSelect={(code) => selectStock(code)}
+              />
+            </Match>
+            <Match when={activeView() === 'replay'}>
+              <Show when={activeQuote()} fallback={missingQuote('复盘')}>
+                {(quote) => (
+                  <ReplayPanel
+                    embedded
+                    code={quote().code}
+                    name={quote().name}
+                    onClose={() => closeView('replay')}
+                  />
+                )}
+              </Show>
+            </Match>
+            <Match when={activeView() === 'alerts'}>
+              <AlertPanel
+                embedded
+                quote={activeQuote()}
+                onClose={() => closeView('alerts')}
+                onSelect={(code) => selectStock(code)}
+              />
+            </Match>
+          </Switch>
+        </div>
       </main>
 
-      {/* 右栏：盘口在上（自适应撑开），指标在下（内容高度） */}
-      <aside class="rail rail--stacked">
-        <Show when={activeQuote()}>
-          {(quote) => (
-            <>
-              <section class="card panel panel--book">
-                <div class="panel__head">
-                  <span class="card__title">五档盘口</span>
-                  <span class="statusbar__text">手</span>
-                </div>
-                <div class="panel__body panel__body--fill">
-                  <OrderBook quote={quote()} />
-                </div>
-              </section>
-
-              <section class="card panel panel--detail">
-                <div class="panel__head panel__head--tabs">
-                  <div class="rail-tabs" role="tablist" aria-label="成交与指标">
-                    <button
-                      class="rail-tab rail-tab--tape"
-                      classList={{ 'rail-tab--active': railTab() === 'tape' }}
-                      role="tab"
-                      aria-selected={railTab() === 'tape'}
-                      onClick={() => setRailTab('tape')}
-                    >
-                      明细
-                    </button>
-                    <button
-                      class="rail-tab rail-tab--stats"
-                      classList={{ 'rail-tab--active': railTab() === 'stats' }}
-                      role="tab"
-                      aria-selected={railTab() === 'stats'}
-                      onClick={() => setRailTab('stats')}
-                    >
-                      指标
-                    </button>
-                    <button
-                      class="rail-tab rail-tab--price"
-                      classList={{ 'rail-tab--active': railTab() === 'price' }}
-                      role="tab"
-                      aria-selected={railTab() === 'price'}
-                      onClick={() => setRailTab('price')}
-                    >
-                      分价
-                    </button>
-                    <button
-                      class="rail-tab rail-tab--flow"
-                      classList={{ 'rail-tab--active': railTab() === 'flow' }}
-                      role="tab"
-                      aria-selected={railTab() === 'flow'}
-                      onClick={() => setRailTab('flow')}
-                    >
-                      资金
-                    </button>
-                    <button
-                      class="rail-tab rail-tab--auction"
-                      classList={{ 'rail-tab--active': railTab() === 'auction' }}
-                      role="tab"
-                      aria-selected={railTab() === 'auction'}
-                      onClick={() => setRailTab('auction')}
-                    >
-                      竞价
-                    </button>
-                  </div>
-                  <span class="statusbar__text">
-                    {railTab() === 'tape'
-                      ? '60 笔'
-                      : railTab() === 'stats'
-                        ? quote().market === 'HK'
-                          ? '港股'
-                          : 'A 股'
-                        : railTab() === 'flow'
-                          ? '5 日'
-                          : '快照'}
-                  </span>
-                </div>
-                <div class="panel__body panel__body--fill">
-                  <Switch fallback={<TradeTape code={quote().code} />}>
-                    <Match when={railTab() === 'stats'}>
-                      <StatsGrid quote={quote()} />
-                    </Match>
-                    <Match when={railTab() === 'price'}>
-                      <PriceDistribution code={quote().code} />
-                    </Match>
-                    <Match when={railTab() === 'flow'}>
-                      <MoneyFlow code={quote().code} />
-                    </Match>
-                    <Match when={railTab() === 'auction'}>
-                      <AuctionTape code={quote().code} />
-                    </Match>
-                  </Switch>
-                </div>
-              </section>
-            </>
-          )}
-        </Show>
-      </aside>
-
-      <StatusBar
-        onOpenShortcuts={() => setShortcutsOpen(true)}
-        onOpenMarketReport={() => setMarketReportOpen(true)}
-      />
-
-      <Show when={rankingOpen()}>
-        <RankingPanel
-          onClose={() => setRankingOpen(false)}
-          onSelect={(quote) => {
-            // 排行里的股票通常不在自选：先塞进行情 store，再让 active code 进入订阅
-            applyQuotes([quote])
-            setActiveCode(quote.code)
-            setRankingOpen(false)
-          }}
-        />
-      </Show>
-
-      <Show when={f10Open() ? activeQuote() : undefined}>
+      <Show when={activeView() === 'chart' ? activeQuote() : undefined}>
         {(quote) => (
-          <F10Panel code={quote().code} name={quote().name} onClose={() => setF10Open(false)} />
+          <aside class="rail rail--stacked">
+            <section class="card panel panel--book">
+              <div class="panel__head">
+                <span class="card__title">五档盘口</span>
+                <span class="statusbar__text">手</span>
+              </div>
+              <div class="panel__body panel__body--fill">
+                <OrderBook quote={quote()} />
+              </div>
+            </section>
+
+            <section class="card panel panel--detail">
+              <div class="panel__head panel__head--tabs">
+                <div class="rail-tabs" role="tablist" aria-label="成交与指标">
+                  <button
+                    class="rail-tab rail-tab--tape"
+                    classList={{ 'rail-tab--active': railTab() === 'tape' }}
+                    role="tab"
+                    aria-selected={railTab() === 'tape'}
+                    onClick={() => setRailTab('tape')}
+                  >
+                    明细
+                  </button>
+                  <button
+                    class="rail-tab rail-tab--stats"
+                    classList={{ 'rail-tab--active': railTab() === 'stats' }}
+                    role="tab"
+                    aria-selected={railTab() === 'stats'}
+                    onClick={() => setRailTab('stats')}
+                  >
+                    指标
+                  </button>
+                  <button
+                    class="rail-tab rail-tab--price"
+                    classList={{ 'rail-tab--active': railTab() === 'price' }}
+                    role="tab"
+                    aria-selected={railTab() === 'price'}
+                    onClick={() => setRailTab('price')}
+                  >
+                    分价
+                  </button>
+                  <button
+                    class="rail-tab rail-tab--flow"
+                    classList={{ 'rail-tab--active': railTab() === 'flow' }}
+                    role="tab"
+                    aria-selected={railTab() === 'flow'}
+                    onClick={() => setRailTab('flow')}
+                  >
+                    资金
+                  </button>
+                  <button
+                    class="rail-tab rail-tab--auction"
+                    classList={{ 'rail-tab--active': railTab() === 'auction' }}
+                    role="tab"
+                    aria-selected={railTab() === 'auction'}
+                    onClick={() => setRailTab('auction')}
+                  >
+                    竞价
+                  </button>
+                </div>
+                <span class="statusbar__text">
+                  {railTab() === 'tape'
+                    ? '60 笔'
+                    : railTab() === 'stats'
+                      ? 'A 股'
+                      : railTab() === 'flow'
+                        ? '5 日'
+                        : '快照'}
+                </span>
+              </div>
+              <div class="panel__body panel__body--fill">
+                <Switch fallback={<TradeTape code={quote().code} />}>
+                  <Match when={railTab() === 'stats'}>
+                    <StatsGrid quote={quote()} />
+                  </Match>
+                  <Match when={railTab() === 'price'}>
+                    <PriceDistribution code={quote().code} />
+                  </Match>
+                  <Match when={railTab() === 'flow'}>
+                    <MoneyFlow code={quote().code} />
+                  </Match>
+                  <Match when={railTab() === 'auction'}>
+                    <AuctionTape code={quote().code} />
+                  </Match>
+                </Switch>
+              </div>
+            </section>
+          </aside>
         )}
       </Show>
 
-      <Show when={blocksOpen()}>
-        <BlockPanel
-          onClose={() => setBlocksOpen(false)}
-          onSelect={(quote) => {
-            applyQuotes([quote])
-            setActiveCode(quote.code)
-            setBlocksOpen(false)
-          }}
-        />
-      </Show>
+      <StatusBar />
 
-      <Show when={screenerOpen()}>
-        <ScreenerPanel
-          onClose={() => setScreenerOpen(false)}
-          onSelect={(quote) => {
-            applyQuotes([quote])
-            setActiveCode(quote.code)
-            setScreenerOpen(false)
-          }}
-        />
-      </Show>
-
-      <Show when={dataOpen()}>
-        <DataPanel onClose={() => setDataOpen(false)} />
-      </Show>
-
-      <Show when={replayOpen() ? activeQuote() : undefined}>
+      {/* ------------------------------------------------ 允许保留的弹窗 */}
+      <Show when={popup() === 'f10' ? activeQuote() : undefined}>
         {(quote) => (
-          <ReplayPanel
-            code={quote().code}
-            name={quote().name}
-            onClose={() => setReplayOpen(false)}
-          />
+          <F10Panel code={quote().code} name={quote().name} onClose={() => closePopup()} />
         )}
       </Show>
-
-      <Show when={multiOpen()}>
-        <MultiStockPanel
-          onClose={() => setMultiOpen(false)}
-          onSelect={(code) => setActiveCode(code)}
-        />
-      </Show>
-
-      <Show when={fullWatchlistOpen()}>
-        <WatchlistFullscreen onClose={() => setFullWatchlistOpen(false)} onSelect={setActiveCode} />
-      </Show>
-
-      <Show when={announcementsOpen() ? activeQuote() : undefined}>
+      <Show when={popup() === 'announcements' ? activeQuote() : undefined}>
         {(quote) => (
           <AnnouncementsPanel
             code={quote().code}
             name={quote().name}
-            onClose={() => setAnnouncementsOpen(false)}
+            onClose={() => closePopup()}
           />
         )}
       </Show>
-
-      <Show when={marketReportOpen()}>
-        <MarketReportPanel onClose={() => setMarketReportOpen(false)} />
-      </Show>
-
-      <Show when={dragonOpen()}>
-        <DragonPanel
-          onClose={() => setDragonOpen(false)}
-          onSelect={(code) => {
-            setActiveCode(code)
-            setDragonOpen(false)
-          }}
-        />
-      </Show>
-
-      <Show when={unusualOpen()}>
-        <UnusualPanel
-          onClose={() => setUnusualOpen(false)}
-          onSelect={(code) => {
-            setActiveCode(code)
-            setUnusualOpen(false)
-          }}
-        />
-      </Show>
-
-      <Show when={marketOpen()}>
-        <MarketListPanel
-          onClose={() => setMarketOpen(false)}
-          onSelect={(quote) => {
-            applyQuotes([quote])
-            setActiveCode(quote.code)
-            setMarketOpen(false)
-          }}
-          onOpenBlocks={() => setBlocksOpen(true)}
-        />
-      </Show>
-
-      <Show when={portfolioOpen()}>
-        <PortfolioPanel
-          onClose={() => setPortfolioOpen(false)}
-          onSelect={(quote) => setActiveCode(quote.code)}
-        />
-      </Show>
-
-      <Show when={shortcutsOpen()}>
-        <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />
-      </Show>
-
-      <Show when={serversOpen()}>
-        <div
-          class="server-backdrop"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setServersOpen(false)
-          }}
-        >
-          <section class="server-shell" aria-label="行情服务器">
-            <ServerWindow onClose={() => setServersOpen(false)} />
-          </section>
-        </div>
-      </Show>
-
-      <Show when={settingsOpen()}>
-        <SettingsPanel onClose={() => setSettingsOpen(false)} />
-      </Show>
-
-      <Show when={indicatorOpen() ? activeQuote() : undefined}>
-        {(quote) => (
-          <IndicatorPanel
-            code={quote().code}
-            name={quote().name}
-            onClose={() => setIndicatorOpen(false)}
-          />
-        )}
-      </Show>
-
-      <Show when={formulaOpen() ? activeQuote() : undefined}>
+      <Show when={popup() === 'formula' ? activeQuote() : undefined}>
         {(quote) => (
           <FormulaPanel
             code={quote().code}
             name={quote().name}
-            onClose={() => setFormulaOpen(false)}
+            onClose={() => closePopup()}
             onSelect={(code) => {
-              setActiveCode(code)
-              setFormulaOpen(false)
+              selectStock(code)
             }}
           />
         )}
       </Show>
-
-      <Show when={alertsOpen()}>
-        <AlertPanel
-          quote={activeQuote()}
-          onClose={() => setAlertsOpen(false)}
-          onSelect={(code) => {
-            setActiveCode(code)
-            setAlertsOpen(false)
+      <Show when={popup() === 'indicators' ? activeQuote() : undefined}>
+        {(quote) => (
+          <IndicatorPanel code={quote().code} name={quote().name} onClose={() => closePopup()} />
+        )}
+      </Show>
+      <Show when={popup() === 'data'}>
+        <DataPanel onClose={() => closePopup()} />
+      </Show>
+      <Show when={popup() === 'settings'}>
+        <SettingsPanel onClose={() => closePopup()} />
+      </Show>
+      <Show when={popup() === 'servers'}>
+        <div
+          class="server-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closePopup()
           }}
-        />
+        >
+          <section class="server-shell" role="dialog" aria-modal="true" aria-label="行情服务器">
+            <ServerWindow onClose={() => closePopup()} />
+          </section>
+        </div>
+      </Show>
+      <Show when={popup() === 'shortcuts'}>
+        <ShortcutsPanel onClose={() => closePopup()} />
       </Show>
 
       <Show when={latestAlert()}>
@@ -592,24 +653,25 @@ export default function App(): JSX.Element {
           <AlertToast
             event={event()}
             onDismiss={dismissLatestAlert}
-            onSelect={(code) => setActiveCode(code)}
+            onSelect={(code) => selectStock(code)}
           />
         )}
       </Show>
+
       <div
         class="layout-resizer layout-resizer--sidebar"
         role="separator"
-        title="拖动调整自选栏宽度，双击恢复 280px"
-        aria-label="调整自选栏宽度"
+        title="拖动调整导航栏宽度，双击恢复 264px"
+        aria-label="调整导航栏宽度"
         onPointerDown={(event) => beginResize('sidebar', event)}
-        onDblClick={() => updateSettings({ sidebarWidth: 280 })}
+        onDblClick={() => updateSettings({ sidebarWidth: 264 })}
       />
       <div
         class="layout-resizer layout-resizer--rail"
         role="separator"
         aria-label="调整盘口栏宽度"
         onPointerDown={(event) => beginResize('rail', event)}
-        onDblClick={() => updateSettings({ railWidth: 318 })}
+        onDblClick={() => updateSettings({ railWidth: 300 })}
       />
       {/* 任意个股列表右键弹出的「加入自选/自定义板块」菜单 */}
       <StockMenu />

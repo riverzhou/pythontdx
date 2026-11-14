@@ -1,4 +1,4 @@
-"""把 tdx_bridge.py 打成单文件可执行程序。
+"""把 tdx_server.py（内含 Bridge 与 HTTP/WS 服务）打成单文件可执行程序。
 
 默认且只使用 Nuitka（编译为机器码，onefile 不携带 Python 源码）：
     python3 -m pip install -r requirements.txt
@@ -7,8 +7,11 @@
 产物：
     python/dist/tdx-bridge        （Windows 是 tdx-bridge.exe）
 
+产物不再用 stdio 与 Electron 通信：桌面壳带 `--serve` 拉起它，浏览器与
+Electron 渲染层都通过同一个本地 HTTP/WebSocket 端口取数（同一套协议）。
+
 electron-builder 会把 python/dist 整个目录复制到
-resources/tdx-bridge/，主进程按这个路径拉起子进程。
+resources/tdx-bridge/，主进程按这个路径拉起本地服务。
 """
 
 from __future__ import annotations
@@ -36,10 +39,13 @@ def sidecar_cache_tag() -> str:
     except PackageNotFoundError:
         digest.update(b"unknown-nuitka")
 
-    for path in sorted(ROOT.glob("*.py")):
-        if path.name.startswith("test_"):
+    # 协议层拆到 tdxproto/ 之后要递归取源码：sidecar 里编进去的每个 .py 都算指纹，
+    # 否则改了子模块还复用旧缓存。tests/ 不参与打包，显式跳过。
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT)
+        if rel.parts[0] in {"tests", "build", "dist"}:
             continue
-        digest.update(path.name.encode("utf-8"))
+        digest.update(rel.as_posix().encode("utf-8"))
         digest.update(path.read_bytes())
     digest.update((ROOT / "connect.cfg").read_bytes())
     digest.update((ROOT / "fixtures" / "tdx_holidays.json").read_bytes())
@@ -112,7 +118,7 @@ def build_nuitka() -> None:
     )
     print(f"[build] onefile cache: {{CACHE_DIR}}/pythontdx/tdx-bridge/{cache_tag}")
 
-    command.append(str(ROOT / "tdx_bridge.py"))
+    command.append(str(ROOT / "tdx_server.py"))
     print("[build] Nuitka:", " ".join(command), flush=True)
     subprocess.run(command, cwd=ROOT, env=env, check=True)
 

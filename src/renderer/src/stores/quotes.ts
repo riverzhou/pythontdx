@@ -1,21 +1,24 @@
 /**
  * 行情数据流。
  *
- * 数据方向是「主进程推、渲染进程收」：
+ * 数据方向是「Python 调度、渲染层收」：
  *   渲染层只声明自己关心哪些代码、多久刷一次，
- *   真正的定时器和网络请求都在主进程（见 src/main/services/poller.ts）。
+ *   真正的订阅调度在 Python SubscriptionHub（/ws 或 /api/stream）。
  */
 import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import type { ConnectionStatus, Quote, QuoteUpdate } from '@shared/types'
-import { api, errorMessage } from '../lib/ipc'
-import { renameWatchItem, watchItemOf } from './app'
+import { api, errorMessage } from '../lib/client'
+import { appState, renameWatchItem, watchItemOf } from './app'
 import { scanAlerts } from './alerts'
 
 const [quoteMap, setQuoteMap] = createStore<Record<string, Quote>>({})
 const [connection, setConnection] = createSignal<ConnectionStatus>('idle')
 const [lastUpdateAt, setLastUpdateAt] = createSignal(0)
 const [streamError, setStreamError] = createSignal<string | null>(null)
+const [pageVisible, setPageVisible] = createSignal(
+  typeof document === 'undefined' || document.visibilityState !== 'hidden'
+)
 
 /** 上次行情快照：让重启后的首屏先显示上次数据，网络回来再覆盖。 */
 const QUOTE_CACHE_KEY = 'pythontdx.quote-cache-v1'
@@ -105,6 +108,14 @@ export function createQuoteStream(codes: Accessor<string[]>, intervalMs: Accesso
 
   onCleanup(dispose)
 
+  if (typeof document !== 'undefined') {
+    const onVisibility = (): void => {
+      setPageVisible(document.visibilityState !== 'hidden')
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    onCleanup(() => document.removeEventListener('visibilitychange', onVisibility))
+  }
+
   createEffect(() => {
     const list = codes()
     const interval = intervalMs()
@@ -112,6 +123,11 @@ export function createQuoteStream(codes: Accessor<string[]>, intervalMs: Accesso
     if (list.length === 0) {
       void api.quote.unsubscribe()
       setConnection('idle')
+      return
+    }
+    if (appState.settings.pauseWhenHidden && !pageVisible()) {
+      void api.quote.unsubscribe()
+      setConnection('paused')
       return
     }
 

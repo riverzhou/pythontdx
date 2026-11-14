@@ -1,0 +1,1318 @@
+/* ------------------------------------------- 左侧：自选股 / 板块 / 自定义 */
+.sidebar__modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  flex: none;
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+
+.sidebar__mode {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+
+.sidebar__mode[data-active='true'] {
+  color: var(--text-1);
+  border-color: var(--accent);
+  background: var(--panel-active);
+}
+
+/*
+ * 快捷页面栏：一条带边框的分段按钮条，按钮等分宽度（flex:1 1 0），
+ * 侧栏拖到最窄 200px 时也只会一起变窄，不会溢出、不会换行或撑宽侧栏。
+ */
+.sidebar__quick {
+  display: flex;
+  gap: 1px;
+  flex: none;
+  margin: 0 var(--sp-3) var(--sp-2);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.sidebar__quick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 22px;
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+
+.sidebar__quick-btn:hover {
+  color: var(--accent);
+  background: var(--panel-hover);
+}
+
+.sector-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 0 var(--sp-2) var(--sp-2);
+}
+
+.sector-head__pick {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.sector-head__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.sector-head__count {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.sector-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px minmax(58px, auto) 20px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px;
+  margin-bottom: 1px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-2) var(--ease),
+    border-color var(--dur-2) var(--ease);
+}
+
+.sector-row:hover {
+  background: var(--panel-hover);
+}
+
+.sector-row[data-active='true'] {
+  background: var(--panel-active);
+  border-color: rgba(91, 140, 255, 0.32);
+  color: var(--text-1);
+}
+
+.sector-row__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sector-row__name {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-row__code {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+}
+
+.sector-row__nums {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  min-width: 58px;
+  text-align: right;
+}
+
+.sector-row__price {
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.sector-row__chg {
+  min-width: 0;
+  font-size: var(--fs-2xs);
+  line-height: 1.15;
+  text-align: right;
+}
+
+/* 与自选股行右侧的删除按钮占位对齐，三个栏目价格列才不会错位 */
+.sector-row__tail {
+  width: 20px;
+  height: 1px;
+}
+
+.sector-loading {
+  padding: 6px 10px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.sector-error {
+  margin: 0 var(--sp-2) var(--sp-2);
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--down);
+  font-size: var(--fs-2xs);
+}
+
+/* --------------------------------------------- 板块选择大窗口 */
+.sector-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.sector-picker__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1080px, 94vw);
+  height: min(780px, 88vh);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-base);
+  box-shadow: var(--shadow-3);
+}
+
+.sector-picker__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px 8px;
+}
+
+.sector-picker__eyebrow {
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.12em;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+.sector-picker__title {
+  margin: 2px 0 0;
+  font-size: var(--fs-lg);
+  color: var(--text-1);
+}
+
+.sector-picker__layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* 第一级：分类方式（行业/概念/风格/一般/客户端自定义…）不能平铺成一行 */
+.sector-picker__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+  width: 156px;
+  padding: 10px 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+.sector-picker__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.sector-picker__tab {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sector-picker__tab:hover {
+  background: var(--panel);
+  color: var(--text-2);
+}
+
+.sector-picker__tab[data-active='true'] {
+  color: var(--text-1);
+  border-color: var(--accent);
+  background: var(--panel-active);
+}
+
+.sector-picker__search {
+  flex: none;
+  margin: 10px 18px 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+}
+
+.sector-picker__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sector-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 6px;
+  padding: 12px 18px 18px;
+}
+
+.sector-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.sector-card:hover {
+  border-color: var(--accent);
+  background: var(--panel-hover);
+  color: var(--text-1);
+}
+
+.sector-card__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-card__count {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.sector-picker__hint {
+  padding: 40px 18px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.sector-picker__error {
+  margin: 8px 18px 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--down);
+  font-size: var(--fs-xs);
+}
+
+.sector-picker__foot {
+  padding: 8px 18px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+/* ------------------------------------------- 个股右键菜单 */
+.stock-menu {
+  position: fixed;
+  /* 排行榜/板块/选股面板的遮罩是 300~332，右键菜单必须盖在它们上面 */
+  z-index: 420;
+  width: 238px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-3);
+}
+
+.stock-menu__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stock-menu__head strong {
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+}
+
+.stock-menu__head span {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.stock-menu__section {
+  padding: 8px 8px 4px;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+.stock-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.stock-menu__item:hover {
+  background: var(--panel-hover);
+  color: var(--text-1);
+}
+
+.stock-menu__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-menu__badge {
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--panel-active);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+}
+
+.stock-menu__count {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.stock-menu__hint {
+  padding: 6px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  line-height: 1.6;
+}
+
+.stock-menu__foot {
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+/* ------------------------------------------- 自定义板块（单层 + 下拉框） */
+.custom-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 0 var(--sp-2) var(--sp-2);
+}
+
+.custom-select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+}
+
+/* 新建 / 改名对话框（Electron 不支持 window.prompt，自己做一个小弹层） */
+.name-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 430;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.name-dialog__panel {
+  width: 300px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-3);
+}
+
+.name-dialog__title {
+  margin-bottom: 10px;
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+.name-dialog__input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-base);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+.name-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+/* 板块排行行里的迷你走势图 */
+.sector-row__spark {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 46px;
+  height: 20px;
+}
+
+.sector-row__spark .sparkline {
+  width: 46px !important;
+  min-width: 46px;
+  height: 20px;
+  opacity: 0.95;
+  transition: opacity var(--dur-2) var(--ease);
+}
+
+.sector-row:hover .sparkline {
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+ * 0.9.4：所有「看股票信息」的二级窗口按主窗口尺寸放大
+ * 96vw × 92vh，不再各自写死 760~1180px；主窗口全屏时这些窗口也接近全屏。
+ * 设置/数据管理这类表单窗口不在此列。
+ * ------------------------------------------------------------------------ */
+.ranking,
+.tape-large,
+.f10,
+.announcements,
+.block-panel,
+.screener,
+.replay-panel,
+.formula-panel,
+.market-panel,
+.unusual-panel,
+.dragon-panel,
+.mreport-panel,
+.sector-picker__panel,
+.multi-panel {
+  /* 96vw×92vh 再减去遮罩 32px 内边距，避免窄窗口下左右/上下被裁掉 */
+  width: min(var(--panel-w), calc(100vw - 64px));
+  max-width: min(var(--panel-w), calc(100vw - 64px));
+  height: min(var(--panel-h), calc(100vh - 64px));
+  max-height: min(var(--panel-h), calc(100vh - 64px));
+}
+
+/* --------------------------------------------------------------------------
+ * 0.9.6：股票列表统一列宽/对齐（全市场 / 板块 / 排行榜）
+ * 代码 + 名称占左侧，数值列固定宽度靠右，走势固定 58px；名称吃掉剩余宽度，
+ * 不再让浏览器把多余空间平均摊到每个数字列之间。
+ * ------------------------------------------------------------------------ */
+.market__table,
+.block__table,
+.ranking__table {
+  table-layout: fixed;
+  margin: 0 auto;
+}
+
+.market__table,
+.block__table,
+.ranking__table {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.market__table th,
+.market__table td,
+.block__table th,
+.block__table td,
+.ranking__table th,
+.ranking__table td {
+  padding: 6px 6px;
+  height: 34px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.market__table td:nth-child(1),
+.block__table td:nth-child(1),
+.ranking__table td:nth-child(2) {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.market__table td:nth-child(2),
+.block__table td:nth-child(2),
+.ranking__table td:nth-child(3) {
+  overflow: hidden;
+  color: var(--text-1);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ranking__table td:nth-child(3) {
+  color: var(--text-1);
+}
+
+.ranking__spark-head,
+.ranking__spark-cell {
+  width: 58px;
+}
+
+.ranking__spark-cell .sparkline {
+  display: block;
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------------------------
+ * 0.9.6：多股同列固定 3×3，K 线铺满每一格
+ * ------------------------------------------------------------------------ */
+.multi-panel {
+  width: min(var(--panel-w), calc(100vw - 64px));
+  max-width: min(var(--panel-w), calc(100vw - 64px));
+  height: min(var(--panel-h), calc(100vh - 64px));
+  max-height: min(var(--panel-h), calc(100vh - 64px));
+}
+
+.multi__head {
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 12px 18px;
+}
+
+.multi__head > div:first-child {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.multi__periods {
+  display: flex;
+  flex: none;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.multi__periods .multi__mode {
+  padding: 3px 7px;
+}
+
+.multi__hint {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+.multi__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.multi__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  width: 100%;
+  height: 100%;
+}
+
+.multi-card {
+  gap: 2px;
+  min-height: 0;
+  height: 100%;
+  padding: 4px 6px 2px;
+  overflow: hidden;
+}
+
+.multi-card__head {
+  flex: none;
+}
+
+.multi-card__chart {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.multi-card__kline {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.multi-card__state {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.multi-kline__grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.multi-kline__wick {
+  stroke: currentColor;
+  stroke-width: 1;
+}
+
+.multi-kline__body {
+  fill: currentColor;
+}
+
+.multi-kline__up {
+  color: var(--up);
+}
+
+.multi-kline__down {
+  color: var(--down);
+}
+
+.multi-kline__volume-up {
+  fill: var(--up);
+  opacity: 0.45;
+}
+
+.multi-kline__volume-down {
+  fill: var(--down);
+  opacity: 0.45;
+}
+
+/* 45：多股同列的格子/周期按钮不要焦点蓝框 */
+.multi-card:focus,
+.multi-card:focus-visible,
+.multi__periods .multi__mode:focus,
+.multi__periods .multi__mode:focus-visible,
+.multi__pager .multi__mode:focus,
+.multi__pager .multi__mode:focus-visible {
+  outline: none;
+}
+
+.multi__pager {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.multi__page {
+  min-width: 42px;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  text-align: center;
+}
+
+.multi__pager .multi__mode:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 46：分时图的昨收基准与量 */
+.multi-min__baseline {
+  stroke: var(--text-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.55;
+}
+
+.multi-min__volume {
+  fill: var(--accent);
+  opacity: 0.35;
+}
+
+/* 45：格子悬停/聚焦都不画蓝框，只做轻微背景变化 */
+.multi-card:hover,
+.multi-card:focus,
+.multi-card:focus-visible {
+  border-color: var(--border);
+  background: var(--panel-hover);
+  outline: none;
+}
+
+/* 代码列表头与内容用同一等宽字体，视觉起点一致 */
+.market__table th:nth-child(1),
+.block__table th:nth-child(1),
+.ranking__table th:nth-child(2) {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* 52：F10 不再铺满整屏，固定阅读宽度，减少左右空白 */
+.f10 {
+  width: min(1056px, 92vw);
+  max-width: min(1056px, 92vw);
+  height: min(860px, 88vh);
+  max-height: min(860px, 88vh);
+}
+
+/* 公告与 F10 同为阅读型面板：用同一档宽度，避免整屏铺开、表格拉成一片 */
+.announcements {
+  width: min(1056px, 92vw);
+  max-width: min(1056px, 92vw);
+}
+
+/* 66：离线数据完整性校验报告 */
+.data__integrity {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.data__integrity-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.data__integrity-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.data__integrity-report {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+
+.data__integrity-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.data__integrity-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--down);
+  background: var(--down-soft);
+  font-weight: 600;
+}
+
+.data__integrity-badge--bad {
+  color: var(--up);
+  background: var(--up-soft);
+}
+
+.data__integrity-time {
+  margin-left: auto;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+
+.data__integrity-checks {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.data__integrity-check {
+  display: grid;
+  grid-template-columns: 120px 1fr 52px;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.data__integrity-name {
+  color: var(--text-1);
+  font-family: var(--font-mono);
+}
+
+.data__integrity-state {
+  color: var(--down);
+  text-align: right;
+}
+
+.data__integrity-state--bad {
+  color: var(--up);
+}
+
+.data__integrity-details {
+  grid-column: 1 / -1;
+  margin: 2px 0 4px 12px;
+  color: var(--up);
+  font-size: var(--fs-2xs);
+  list-style: disc;
+}
+
+.data__integrity-backfill {
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.data__coverage {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.data__coverage-summary {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.data__coverage-grid {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.data__coverage-item {
+  display: grid;
+  grid-template-columns: 110px 150px 1fr 44px;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+}
+
+.data__coverage-name {
+  color: var(--text-1);
+  font-family: var(--font-mono);
+}
+
+.data__coverage-range {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.data__coverage-state {
+  color: var(--down);
+  text-align: right;
+}
+
+.data__coverage-state--empty {
+  color: var(--text-3);
+}
+
+.data__integrity-progress {
+  margin-top: 8px;
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+}
+
+/* 69：离线数据统计/校验进度条 */
+.data__integrity-busy {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.data__integrity-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-hover);
+}
+
+.data__integrity-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2, var(--accent)));
+  transition: width 220ms ease-out;
+}
+
+/* 73：自选/自定义/多股同列的拖动排序反馈 */
+.sector-row--dragging,
+.multi-card--dragging {
+  opacity: 0.35;
+}
+
+.sector-row--drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.sector-row--drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.multi-card--drop {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.multi-card {
+  cursor: grab;
+}
+
+.multi-card:active {
+  cursor: grabbing;
+}
+
+/* 78：对齐官方多股同列：每格顶部数据行 + 右侧刻度 + 分时四道淡时间线 */
+.multi-card__head {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.multi-card__name {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.multi-card__period {
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-3);
+  font-size: 8px;
+  line-height: 13px;
+}
+
+.multi-card__code {
+  margin-left: auto;
+  font-size: 8px;
+}
+
+.multi-card__quote {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  line-height: 11px;
+  white-space: nowrap;
+}
+
+.multi-card__quote .multi-card__price {
+  color: var(--text-1);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.multi-card__plot {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.multi-card__plot .multi-card__kline {
+  flex: 1;
+  min-width: 0;
+}
+
+.multi-card__axis {
+  position: relative;
+  flex: none;
+  width: 27px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 6px;
+  line-height: 8px;
+}
+
+.multi-card__axis--minute {
+  width: 28px;
+}
+
+.multi-card__axis > span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.multi-min__time {
+  stroke: var(--text-3);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  opacity: 0.18;
+}
+
+/* ================================================================ 下拉菜单 */
+.menu {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  background: transparent;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menu__trigger:hover,
+.menu__trigger[aria-expanded='true'] {
+  color: var(--text-1);
+  background: var(--panel-hover);
+}
+
+.menu__caret {
+  color: var(--text-3);
+  font-size: 9px;
+  transform: translateY(-1px);
+}
+
+.menu__panel {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 420;
+  display: flex;
+  flex-direction: column;
+  min-width: 196px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-3);
+}
+
+.menu__panel--right {
+  right: 0;
+  left: auto;
+}
+
+.menu__panel--portal {
+  position: fixed;
+  right: auto;
+  z-index: 900;
+}
+
+.menu__panel--portal.menu__panel--right {
+  right: auto;
+  left: auto;
+}
+
+.menu__section {
+  padding: 6px 9px 3px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--text-1);
+  background: transparent;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu__item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.menu__item:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.menu__hint {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.menu__separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+.alerts-open {
+  position: relative;
+}
+
+.sidebar-hide {
+  color: var(--text-3);
+  font-size: 16px;
+  letter-spacing: -2px;
+}
+
+.dot--paused {
+  background: var(--text-3);
+  box-shadow: 0 0 0 3px var(--flat-soft);
+}
+
+/* ============================================================ 1440×900 最低档
+ * 设计基准 1920×1080；1440 是最低支持分辨率。这一档把两个市值列收起来、
+ * 单元格横向内边距收紧 1px，保证全市场 20 列不出现横向滚动条。
+ */
+@media (max-width: 1540px) {
+  .market__table [data-col='totalCap'],
+  .market__table [data-col='floatCap'],
+  .block__table [data-col='totalCap'],
+  .block__table [data-col='floatCap'],
+  .block__table [data-col='limitUp'],
+  .block__table [data-col='limitDown'],
+  .ranking__table [data-col='totalCap'],
+  .ranking__table [data-col='floatCap'],
+  .ranking__table [data-col='limitUp'],
+  .ranking__table [data-col='limitDown'] {
+    display: none;
+  }
+  .market__table th,
+  .market__table td,
+  .block__table th,
+  .block__table td,
+  .ranking__table th,
+  .ranking__table td {
+    padding-right: 5px;
+    padding-left: 5px;
+  }
+}
+
+/*
+ * 1440×900 横滚专项：表格 wrap 自身有左右 padding，表宽要按「wrap 内容宽」算。
+ * 这一档把几个 wrap 的留白收窄，并让全市场少一列（振幅在行情头已有），
+ * 保证下面这些列表在 1440 宽度下不出横向滚动条。
+ */
+@media (max-width: 1540px) {
+  .market__table-wrap {
+    padding: 0 12px;
+  }
+
+  .mreport__table-wrap {
+    padding: 0 12px 12px;
+  }
+
+  .mreport__table th,
+  .mreport__table td {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .dragon__table-wrap {
+    padding: 0 12px 12px;
+  }
+
+  .market__table [data-col='amplitude'] {
+    display: none;
+  }
+}

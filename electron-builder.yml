@@ -26,6 +26,9 @@ extraResources:
     to: tdx-bridge
     filter:
       - 'tdx-bridge*'
+  # 统一传输后由 Python 服务托管同一份 Web 页面；Electron 不再 loadFile。
+  - from: out/web
+    to: web
   # 工程内置的 Windows 客户端主站快照；与 sidecar 同目录，便于离线/无客户端环境使用。
   - from: python/connect.cfg
     to: tdx-bridge/connect.cfg
@@ -100,4 +103,4 @@ linux:
     - AppImage
     - deb
 
-beforePack: scripts/before-pack.cjs
+beforePack: scripts/build/before-pack.cjs

@@ -24,7 +24,7 @@ import {
 import { mergeImportedGroups } from '@shared/watchlist'
 import { localDateKey, shouldAutoArchive } from '@shared/archive'
 import { setMarketCalendarStatus } from '@shared/market'
-import { api } from '../lib/ipc'
+import { api, shell } from '../lib/client'
 
 const [state, setState] = createStore<AppState>({
   version: STATE_VERSION,
@@ -89,17 +89,18 @@ function plainGroups(groups: readonly WatchGroup[]): WatchGroup[] {
 /* ------------------------------------------------------------------ 启动 */
 
 export async function bootstrapAppState(): Promise<void> {
-  const [persisted, info] = await Promise.all([api.state.get(), api.app.info()])
+  const [persisted, info] = await Promise.all([shell.state.get(), shell.info()])
 
   const mergedSettings = { ...DEFAULT_SETTINGS, ...persisted.settings }
-  // 旧版默认 264 侧栏在 1440 窗口会挤压名称/迷你图，迁移到 300。
+  // 旧版默认栏宽（264/318、280/330 等）统一迁移到更省横向空间的 264/300。
   if (
     (mergedSettings.sidebarWidth === 264 && mergedSettings.railWidth === 318) ||
     (mergedSettings.sidebarWidth === 300 && mergedSettings.railWidth === 320) ||
-    (mergedSettings.sidebarWidth === 340 && mergedSettings.railWidth === 330)
+    (mergedSettings.sidebarWidth === 340 && mergedSettings.railWidth === 330) ||
+    (mergedSettings.sidebarWidth === 280 && mergedSettings.railWidth === 330)
   ) {
-    mergedSettings.sidebarWidth = 280
-    mergedSettings.railWidth = 330
+    mergedSettings.sidebarWidth = 264
+    mergedSettings.railWidth = 300
   }
   // 九项要求默认刷新 1 秒；旧默认 3 秒的配置一次性迁移。
   if (mergedSettings.refreshInterval === 3000) {
@@ -117,8 +118,8 @@ export async function bootstrapAppState(): Promise<void> {
     alertEvents: Array.isArray(persisted.alertEvents) ? persisted.alertEvents : [],
     positions: Array.isArray(persisted.positions) ? persisted.positions : []
   })
-  // 把迁移后的刷新/布局设置写回主进程，避免下次启动又读到旧默认 3 秒。
-  void api.state.patch({ settings: mergedSettings }).catch(() => undefined)
+  // 把迁移后的刷新/布局设置写回持久化层，避免下次启动又读到旧默认 3 秒。
+  void shell.state.patch({ settings: mergedSettings }).catch(() => undefined)
   setAppInfo(info)
 
   // 告诉 CSS 当前平台，macOS 需要给原生红绿灯留位置
@@ -573,7 +574,7 @@ export function removeFormula(id: string): void {
 /* ------------------------------------------------------------------ 落盘 */
 
 function persist(patch: Partial<AppState>): void {
-  void api.state.patch(patch).catch((error) => {
+  void shell.state.patch(patch).catch((error) => {
     console.error('[app-state] 保存失败：', error)
   })
 }

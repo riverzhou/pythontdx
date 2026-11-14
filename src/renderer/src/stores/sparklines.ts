@@ -18,7 +18,7 @@ import { createEffect, onCleanup, type Accessor } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import { isTradingNow } from '@shared/market'
 import { downsample } from '../lib/chart-geometry'
-import { api } from '../lib/ipc'
+import { api } from '../lib/client'
 
 /** 迷你图只用这么多个点，多了在 46px 宽度上也看不出来 */
 const MAX_POINTS = 60
@@ -26,6 +26,8 @@ const MAX_POINTS = 60
 const REFRESH_MS = 60_000
 /** 并发上限：既不给上游压力，也不至于串行等到天荒地老 */
 const CONCURRENCY = 3
+/** 每分钟静默刷新只覆盖前 N 只；其余靠可见行按需补，避免自选很长时线性放大请求。 */
+const REFRESH_LIMIT = 40
 
 const [sparklines, setSparklines] = createStore<Record<string, SparklineData>>({})
 
@@ -98,8 +100,8 @@ export function createSparklineLoader(codes: Accessor<string[]>): void {
   })
 
   const timer = setInterval(() => {
-    // 非交易时段分时数据不会变，没必要重拉
-    if (isTradingNow()) enqueue(codes(), true)
+    // 非交易时段分时数据不会变，没必要重拉；只刷新当前列表前 40 只。
+    if (isTradingNow()) enqueue(codes().slice(0, REFRESH_LIMIT), true)
   }, REFRESH_MS)
 
   onCleanup(() => clearInterval(timer))

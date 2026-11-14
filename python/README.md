@@ -1,36 +1,39 @@
-# 通达信 Python 桥接进程
+# python/ —— 数据后端
 
-Electron 主进程通过 stdin/stdout 的 JSON Lines 与这个进程通信。
-它只依赖 Python 标准库，不需要 pytdx / eltdx。
+通达信协议、行情调度与缓存、离线同步、数据湖。**数据逻辑的唯一实现**：
+Electron 与 Web 都通过本地 HTTP 取数，渲染层不再持有第二套行情缓存（`PRINCIPLES.md` A2）。
 
-## 为什么单独一个进程
+只依赖 Python 标准库；DuckDB 等分析依赖只在数据工具里按需使用。
 
-- 用户希望通讯层用 Python；
-- Python 侧只做 TCP + 二进制协议 + 解析，TS 侧继续管窗口、缓存、拼音搜索；
-- 打包时用 Nuitka 编译成单文件，用户机器不需要安装 Python，也不携带 Python 源码。
+## 对外形态
+
+| 形态                | 入口                          | 谁在用                                   |
+| ------------------- | ----------------------------- | ---------------------------------------- |
+| HTTP + WebSocket    | `tdx_server.py`（桌面以 `--serve` 拉起） | 桌面（主进程拉起）与 Web（单端口托管） |
+| 进程内模块          | `from tdx_bridge import Bridge` | `scripts/`、测试、离线同步              |
+| JSONL stdio（调试） | `tdx_bridge.py`               | 本地排查；**不再是应用的数据通道**       |
+
+`tdx_bridge.py` 的 stdin/stdout 循环保留下来，一是方便单命令调试，二是 Nuitka
+单文件下离线同步 worker 复用同一个可执行文件（`--offline-worker`）。
 
 ## 开发
 
 ```bash
-# 直接调试：一行命令一个 JSON
+# 只起后端：浏览器 / curl 直接访问
+python3 python/tdx_server.py --port 8765
+python3 python/tdx_server.py --port 8765 --web-dir out/web   # 顺带托管 Web 产物
+
+# 调试单条 Bridge 命令（不经过 HTTP）
 echo '{"id":1,"cmd":"ping"}' | python3 python/tdx_bridge.py
 echo '{"id":2,"cmd":"quotes","payload":{"codes":["sh600519"]}}' | python3 python/tdx_bridge.py
 ```
 
-Electron 开发模式默认调用：
+解释器由 `scripts/python.mjs` 统一挑选，可用 `PYTHONTDX_PYTHON` 指定。
 
-```bash
-python3 python/tdx_bridge.py
-```
+HTTP 路由清单与两端一致性核对表见 [`docs/02`](../docs/02-架构设计.md) 与
+[`docs/23`](../docs/23-前后端边界与双端一致性.md)。
 
-可以用环境变量覆盖：
-
-```bash
-PYTHONTDX_PYTHON=/usr/bin/python3 npm run dev
-PYTHONTDX_TDX_BRIDGE=/path/to/tdx-bridge npm run dev
-```
-
-## 协议
+## Bridge 能力（命令名即能力，HTTP 路径见 docs/02）
 
 | 命令 | payload | 返回 |
 | --- | --- | --- |
@@ -71,44 +74,64 @@ PYTHONTDX_TDX_BRIDGE=/path/to/tdx-bridge npm run dev
 | `offline_sync_cancel` | — | 取消并回收 worker |
 | `shutdown` | — | `"bye"` 后退出 |
 
-成功：`{"id":1,"ok":true,"result":...}`
-失败：`{"id":1,"ok":false,"error":"中文原因"}`
+成功：`{"id":1,"ok":true,"result":...}`；失败：`{"id":1,"ok":false,"error":"中文原因"}`。
 
-## 模块
+## 目录
 
-| 文件 | 职责 |
-| --- | --- |
-| `tdx_bridge.py` | 7709 协议、解析、归档、dispatch |
-| `tdx_mac.py` / `tdx_f10.py` | MAC 0x12xx / 7615 在线资料 |
-| `offline_sync.py` | 离线并行同步：多进程 × 多线程 × 多服务器、08:45–15:45 窗口 |
-| `code_archive.py` | 按代码/业务 key 分片的 JSONL.gz + manifest + SHA256 |
-| `subscription_hub.py` | SSE/WS 订阅合并轮询（首帧基线、错误隔离、慢客户端丢帧） |
-| `protocol_archive.py` | 按 `trade_date` 的整包 dataset 归档 |
-| `tick_archive.py` / `auction_archive.py` / `flow_archive.py` | 逐笔/竞价/资金流按日归档 |
-| `data_coverage.py` / `data_integrity.py` | 覆盖统计与 manifest/SHA256 校验 |
+```text
+python/
+├─ tdx_server.py        入口：HTTP/WS 门面 + 静态页面托管
+├─ tdx_bridge.py        门面 + Bridge 编排：行情/逐笔/竞价/选股、本地缓存、备份恢复
+├─ tdxproto/            协议层（单向依赖，base 不依赖本包其他模块）
+│  ├─ base.py           异常、数据目录、代码归一化、市场常量
+│  ├─ constants.py      命令号、批量上限、TTL、connect.cfg、主站选择、合并规则
+│  ├─ cache.py          进程内缓存规则（TTL/容量/键）
+│  ├─ codec.py          帧编解码、varint、u16/u32/f32、量纲换算
+│  ├─ session.py        单会话握手、请求-响应配对、心跳
+│  ├─ requests.py       请求体构造
+│  ├─ parsers.py        响应解析（行情/K 线/分时/F10）
+│  ├─ blocks.py         板块与扩展数据解析（自定义板块/榜单/异动/成交分布）
+│  └─ business.py       全市场代码索引（CodeIndex）与筛选
+├─ tdx_mac.py            MAC 0x1c / 0x12xx 行情
+├─ tdx_mac_ext.py         MAC 扩展：服务端信息、摘要、K 线、竞价、多日分时
+├─ tdx_f10.py            7615 TQLEX 在线 F10 / 公告
+├─ tdx_local.py           本地 .day 文件读取
+├─ subscription_hub.py    进程内订阅合并（同一组代码只轮询一次）
+├─ push_manager.py        面板级推送服务端调度
+├─ offline_sync.py        离线全量同步：多进程 × 多线程 × 多服务器
+├─ *_archive.py           一类数据一个归档器（snapshot/tick/auction/flow/code/…）
+├─ data_*.py              数据目录、覆盖统计、完整性校验
+├─ formula.py / patterns.py / gbbq.py   领域计算（纯函数）
+├─ tests/                 测试（34 个 test_*.py；`__init__.py` 让 discovery 递归）
+├─ fixtures/              真实报文与节假日快照
+├─ build.py               Nuitka 打包
+└─ connect.cfg            内置主站列表（随包分发）
+```
+
+模块归属规则、命名与「新代码放哪」见 [`docs/24`](../docs/24-项目结构与命名规范.md)。
 
 ## 测试
 
 ```bash
-python3 -m unittest discover -s python -p 'test_*.py' -v
-# 或
 npm run test:python
+# 等价于：python3 -m unittest discover -s python -p 'test_*.py' -v
 ```
 
-fixture 是 2026-10-29/30 实盘抓的真实响应，放在 `python/fixtures/*.hex`。
+- 测试与源码**分目录**：源码在 `python/`，测试在 `python/tests/`；
+- 一个模块一个 `test_<模块>.py`，跨模块回归包用 `test_<主题>_regressions.py`；
+- 报文类用例一律读 `python/fixtures/*.hex`，不在测试里内联长 hex。
 
 ## 打包
 
 ```bash
-pip install -r requirements.txt
-python python/build.py
+python3 -m pip install -r requirements.txt
+python3 python/build.py          # 或 npm run build:python
 # 产物：python/dist/tdx-bridge（Windows：tdx-bridge.exe）
 ```
 
-`electron-builder.yml` 的 `extraResources` 会把它复制到
-`resources/tdx-bridge/`。**打包前必须先跑 `npm run build:python`**，
-否则 electron-builder 会报找不到 `python/dist`。
+`electron-builder.yml` 的 `extraResources` 把它复制到 `resources/tdx-bridge/`；
+主进程在 `src/main/services/server.ts` 里按这个路径拉起 `--serve`。
+**打包前必须先跑 `npm run build:python`**，否则 electron-builder 会报找不到 `python/dist`。
 
-注意：Nuitka 的 onefile 产物是编译后的机器码，不携带 Python 源码；
-如果在意这一点，可以改用 `--onedir`，同时调整 `extraResources` 与
-`bridge.ts` 里的路径。
+Nuitka onefile 产物是机器码，不携带 Python 源码；如果更在意启动速度或调试，
+可以改 `--onedir`，同时调整 `extraResources` 与 `server.ts` 的路径。

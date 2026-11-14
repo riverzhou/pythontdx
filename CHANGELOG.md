@@ -10,6 +10,200 @@ pythontdx 的所有重要变更都记录在这里。
 
 ---
 
+## [1.8.0] - 2026-11-14
+
+### 新增
+
+- **信息密度版主窗口**：标题栏 38px、状态栏 24px、行情头压缩到约 104px、
+  图表二级工具栏默认收起、数据表行高收紧；1440×900 下主图高度从约 525px
+  提升到约 610px，排行榜同屏从 16 行提升到 18 行。
+- 图表头新增「工具」开关：复权/均线/BOLL/线性/画线/副图默认折叠，需要时展开。
+- 行情头新增估值行（PE/PB/流通市值/总市值，字段缺失时自动隐藏）。
+- **服务端面板推送**：新增 `python/push_manager.py` + `/api/push` SSE；
+  渲染层不再持有面板 Timer，断线按稳定 id 重连。
+- **备份/恢复真实进度**：新增 `/api/progress` SSE，`DataPanel` 恢复字节进度条。
+- `pauseWhenHidden` 真正生效：页面隐藏时暂停行情订阅，状态栏显示「已暂停」。
+
+### 变更
+
+- **表头固定**：全市场 / 排行榜 / 板块 / 选股 / 大盘资料 / 组合 / 异动的表头改为
+  `position: sticky`，纵向滚动时列名始终可见。
+- **导航栏收起/展开**：恢复入口放到右上角工具区（面板图标，7 个工具按钮之一）；
+  面板内保留 `«` 就地收起。删掉左缘 26px 的竖排把手——它占屏幕、视觉也差，
+  收起后内容直接铺满，不再留白。
+- **列表列宽**：名称列收到 76 / 72 / 70px；1920+ 把数据列统一放宽（80/80/72px），
+  原本堆在列表右侧的空白摊回列里（1920 实测排行榜尾部空白 345px → 19px）。
+- **「+」菜单收窄**：面板宽度跟内容走（实测 196px → 150px），label 与快捷键提示间距收小。
+- **走势列留白**：去掉表格尾部空白列，迷你走势图统一右 2px / 左 4px；所有列表表格
+  wrap 的右内边距归零，三表右缘坐标一致（1440 实测同为 1421px、1920 同为 1901px，
+  `gapSvgToTable = 2`）。
+- **窗口尺寸一次性重置**：老存档里的窗口几何统一重置为 1440×900（保留最大化记忆），
+  方便按最低支持分辨率验收；迁移版本号 `windowSizeVersion`。
+- **分辨率基线**：设计基准 1920×1080，最低支持 1440×900；窗口默认最大化启动，
+  从最大化还原默认回到 1440×900，最小尺寸卡在 1440×900，低于此不再适配。
+- **默认最大化 + 记忆**：首次启动直接最大化；还原窗口默认 1440×900；之后记住上次
+  是否最大化与正常窗口尺寸，用户还原过窗口就按记住的尺寸打开（截图工具按设计跳过最大化）。
+- **左栏改名为「导航」**：标题由随视图变化的「自选股 / 板块排行 / 自定义板块」统一为
+  「导航」（指南针图标 + 当前列表数量），视图名交给下面的三个切换按钮。
+- **左栏快捷页栏**：在「自选股 / 板块 / 自定义」切换**之上**、自选列表上方新增 6 个
+  快捷入口（排行榜 / 全部 A 股 / 板块 / 多股同列 / 条件选股 / 自选行情墙），
+  按钮等分宽度，侧栏拖到 200px 也不溢出。
+- **逐笔颜色系统**：红=主动买、绿=主动卖、紫=集合竞价、灰=盘后/不明方向；
+  成交量按分位分三档（中单提亮、大单强调色加粗），整页逐笔一屏可读。
+- **导航改版**：移除标题栏「报价 / 分析 / 资讯 / 工具」下拉菜单。工作区页面统一从
+  标签栏「+」打开（行情 / 分析 / 资讯三组，带 60/63/F9/77 提示）；全局工具改为右上角
+  按钮（预警 / 数据 / 服务器 / 快捷键 / 设置 / 主题）；左栏顶部保留列表操作与快捷页栏。
+  右上角按钮统一为图标风格（同一尺寸/间距/悬停），文字说明放 `title`，不再图标与
+  「图标 + 文字」混排。
+- **全屏按钮**：窗口按钮组（最小化 / 最大化 / 关闭）左侧新增「全屏 / 退出全屏」切换；  状态跟随窗口事件，图标与 `title` 同步（`toggle-fullscreen`，非 macOS/Web 才显示）。
+- **公告面板宽度**对齐 F10（1056px 阅读宽度），19 个在线页签收紧后一行放得下。
+- **逐笔明细整页**：自动载入全天成交，按列铺开（1440 宽 5 列、20px 行高），跟随最新
+  成交自动滚屏；一屏约 225 笔，不再是一条竖列。
+- **指标面板**改为两列等距行（30px 行高），标签与数值两端对齐，底部留白不再拉伸。
+- **自选股计数**只统计自选分组，不再把自定义板块的股票算进去。
+- 默认栏宽 264/300（旧默认 280/330 自动迁移），桌面侧栏/右栏更窄，图表更宽。
+- 排行榜、板块、选股、全市场、龙虎榜、异动、大盘资料、组合表统一使用紧凑行高。
+- 主区页头、盘口面板、侧栏行、状态栏按行情终端密度收口。
+- 1024×700 隐藏底部缩放提示，避免压住横轴刻度。
+
+### 技术债
+
+- 已偿还：TD10（设置项 UI）、TD11（迷你图请求上限）、TD13（分时缩放/平移）、
+  TD19（tail 合并共用向量）、TD21（面板推送下沉 Python）、TD22（许可证核对）、
+  TD23（备份进度 SSE）。
+- 代码级未偿还项为 0；TD5/6/7/8/9/12/14/15/16 移入「已接受的外部约束」，
+  理由见 `PLAN.md` 第五节。
+
+### 工程
+
+- 版本 `1.8.0`；`package.json` / `package-lock.json` 同步。
+- `python/push_manager.py`、`python/test_push_manager.py`；`test_server.py`
+  增加推送调度与进度广播用例。
+- 面板推送/进度 SSE 仍由 Python 侧调度；不新增第二条行情通道。
+- **结构收敛（纯重构，无功能变化）**：`python/tdxproto/` 九个单向依赖模块 +
+  `tdx_bridge.py` 门面；`shared/types.ts` 拆 `types/` 七个领域模块；组件按
+  `panels/charts/chrome/atoms` 分组；`components.css` + `app.css` 拆成
+  `components.css` + `panels/*`(6) + `layout/*`(3)；`docs/07` 的版本存档迁
+  `docs/releases/编年史.md`；`scripts/` 按 `build/dev/data/probe` 分组。
+  规则见 `docs/24`，审计记录见 `docs/25`。
+
+### 修复
+
+- **WebSocket 帧头分片**：`_ws_read` 用 `recv(2)` 拿帧头，TCP 只先到 1 字节时
+  被当成断连；改为 `_recv_exact(2)`，并补「帧头分两次到达」的回归用例。
+- **`/api/push` 队列泄漏**：客户端在握手阶段断开时，`register_client` 已登记但
+  finally 还没进入，队列不回收；把响应头写进 try/finally，并补回归用例。
+- **`npm run shot:web` 在 `ELECTRON_RUN_AS_NODE=1` 的终端里直接失败**：
+  新增 `scripts/dev/web-shot.mjs` 启动器，spawn 前清理该变量。
+- **Windows 打包脚本根路径**：`scripts/` 分组后 `sign-win.ps1` / `build-win-zip.ps1`
+  仍按「上一层=仓库根」取路径，`npm run build:win` 会在 `scripts/release` 下找产物；
+  改为向上一层再上一层，随后完整跑通签名与绿色 zip。
+- **1440×900 横向滚屏**：全市场表按「wrap 内容宽」重算（此前只比 wrap 宽，漏算
+  左右 24px 留白），收留白 + 收掉一列；排行榜/板块再收市值与涨跌停两列；
+  大盘资料收表留白；龙虎榜改固定布局并给列宽——14 个列表窗口在 1440×900 实测
+  全部 `wrapOverflow = 0`。
+- **龙虎榜列宽**：短列按内容定宽（日期 88 / 代码 70 / 名称 92 / 收盘 64 …），
+  「上榜原因 16% / 营业部 30%」按比例分配；长文本折行完整显示，不再截断。
+- **「+」菜单跑出窗口**：标签栏最右侧的「+」用左对齐定位，面板会越过窗口右缘；
+  菜单定位改为按视口夹取（右侧不够就左移，下方不够就翻到上方），1440/1920 实测
+  面板完整在窗口内。
+- **名称列被拉伸**：表格 `width:100%` + `table-layout:fixed` 会把多余宽度摊给所有
+  定宽列，名称列在宽屏下被拉宽留白；全市场/排行榜/板块去掉尾部空白列后按比例分配，
+  名称列回到 76/72/70px 量级，走势列不再被尾列拉开。
+- **Web / Electron 一致性**：行情服务器弹层补 `role="dialog" aria-modal="true"`；
+  浏览器版备份/恢复按钮由「点击后报错」改为置灰 + 标题提示 + 区块说明（数据湖/导出
+  仍可在浏览器下载）。
+
+### 文档
+
+- README 全部截图按 1920×1080 重拍（总览 / 多股同列 / 全市场 / 排行榜 / 板块 / F10 /
+  数据工具 / 竞价 / Web），最低档 1440×900 单独一张 `pythontdx-compact-1440.png`；
+  修正 7615 `fetch_*` 数量（51 → 52）、数据湖目录清单、F10 与公告页签的表述、
+  全市场横向滚动的描述。
+- 新增 `docs/25-全库审计报告.md`（范围、方法、发现、复核方式），并补第二轮
+  Web/Electron 一致性与发布前回归（§8）。
+- `docs/22` 新增 §4.4「Web / Electron 一致性」对照表与四条有意保留的差异。
+
+### 验证
+
+- `npm run check`：359 TS（+1 skipped）+ **343 Python**（+1 skipped）全绿。
+- 截图：`screenshots/ui-dense-final.png`、`ui-dense-final-1024.png`、
+  `ui-dense-ranking.png`、`ui-push-sse.png`、`ui-tape-view.png`；
+  本轮审计又按 1.8 重拍 README 的 10 张图（`docs/assets/pythontdx-*.png`）；
+  Web 单端口与 Electron 生产页面数字一致。
+- **Windows 产物实测（2026-11-14）**：Nuitka 4.3.3 + MSVC 14.5 编译
+  `python/dist/tdx-bridge.exe`（22.7 MB）；`python/dist/tdx-bridge.exe --serve`
+  冒烟（ping / code_list / quotes / market_status）通过；`npm run build:win`
+  产出 setup 135 MB、portable 135 MB、绿色 zip 182 MB（sha256 见 `.sha256`），
+  均已自签名；`win-unpacked` 与 portable 实跑截图见 `screenshots/packaged-*.png`。
+- Windows 1.8.0 四件套已本地构建/签名/冒烟（`release/1.8.0/`）；Linux/macOS
+  在对应系统构建后发版。本轮不自动打 tag。
+
+---
+
+## [1.7.0] - 2026-11-14
+
+### 新增
+
+- **统一通讯协议**：Electron 主进程拉起本地 Python 服务并加载
+  `http://127.0.0.1:<port>`，与浏览器共用同一套 `HTTP /api` + `WebSocket /ws`。
+  - 新增 `src/main/services/server.ts`（端口 0 解析、健康检查、退出清理）；
+  - 新增 `src/main/native-ipc.ts`（只保留窗口/状态/对话框/通知）；
+  - 新增 `src/shared/desktop.ts`、`src/renderer/src/lib/shell.ts`
+    （桌面 `window.desktop` 与 Web 降级实现）；
+  - `src/renderer/src/lib/http-api.ts` 成为两端唯一数据适配器。
+- **主工作区标签页**：新增 `stores/workspace.ts`、`WorkspaceTabs`、`Menu`。
+  排行榜、板块/概念、全部 A 股、多股同列、条件选股、自选行情墙、复盘、
+  组合分析、预警、龙虎榜、沪深异动、大盘资料全部在主区打开，可关闭/切换；
+  非行情标签自动收起右栏。
+- **通达信快捷键**：F3 上证、F4 深证、F5 分时↔日 K、F6 行情、F7 公告、
+  F9 选股、F10 资料、数字命令 60/63/77；Esc 关闭弹窗或当前标签。
+- 壳状态仍走 `window.desktop.state`；Web 继续用 `localStorage`
+  （UI 状态，不是行情数据；后续可接服务端状态）。
+
+### 变更
+
+- 标题栏收成「报价 / 分析 / 资讯 / 数据 / 工具」五菜单；侧栏只保留
+  行情墙/多股/选股/新建板块/隐藏侧栏；状态栏移除导入导出（移到设置）。
+- 搜索提交、自选行点击、列表行点击都切回「行情」标签，不再关闭弹窗。
+- 1024 宽自动收窄侧栏/盘口、指标两行、隐藏侧栏迷你图；趋势图刻度按图高降密度。
+- 面板嵌入主区时使用 `role=region`，不再声明 `aria-modal`。
+
+### 移除
+
+- **stdio 行情通道**：`src/main/ipc.ts`、`QuotePoller`、`PushHub`、
+  `src/main/services/tdx/**` 整目录；
+- **Web 端第二套适配器** `src/web/http-api.ts`、`src/web/version.ts`；
+- **独立 K 线窗口 / 第二主窗口 / 板块选择全屏层**；逐笔放大弹窗改为主区「逐笔明细」标签；
+- `window.api`（由 `window.desktop` + 统一 `api` 取代）。
+
+### 工程
+
+- Nuitka 打包入口改为 `python/tdx_server.py`（同时处理 `--offline-worker`）；
+  `--serve` 兼容参数、`PYTHONTDX_PORT=` 端口行；`electron-builder.yml`
+  增加 `out/web → resources/web`。
+- `npm run build` = `electron-vite build` + `npm run build:web`；
+  开发模式 Vite 代理 `/api`、`/ws` 到 8765。
+- 新增 `src/shared/version.ts`、`workspace.test.ts`；更新 `scripts/version.test.mjs`。
+
+### 验证
+
+- `npm run check`：359 TS（+1 skipped）+ 336 Python（+1 skipped）全绿。
+- Electron 生产页面截图：`screenshots/ui-rework-1.png`、`ui-ranking.png`、
+  `ui-blocks.png`、`ui-market.png`、`ui-multi.png`、`ui-sector.png`、
+  `ui-screener.png`、`ui-watch.png`、`ui-report.png`、`ui-alerts.png`、
+  `ui-tabs-menu.png`、`ui-tape-view.png`、`ui-portfolio.png`、`ui-dragon.png`、
+  `ui-unusual.png`、`ui-1024.png`。
+- Web 单端口页面截图：`screenshots/ui-web.png`；同一时刻
+  `sh000001` 3634.35、涨 765/跌 4748/平 68。
+- Nuitka 已用 `python/tdx_server.py` 重新编译 `tdx-bridge.exe`，实测
+  `--serve --port 0` 输出端口行、`/api/ping` 与 `/` 均 200；
+  `electron-builder --win --dir` 产出 `win-unpacked` 并实机启动截图，
+  退出后无残留服务进程。
+- 未做：setup/portable/zip 三件套、Linux/macOS 安装包实测、发布 tag（待人工执行）。
+
+---
+
 ## [1.6.1] - 2026-11-14
 
 ### 修复
@@ -33,8 +227,8 @@ pythontdx 的所有重要变更都记录在这里。
   （335 通过 / 1 skipped）。
 - 真实 7709 实测（2026-11-14 周六 06:12，Windows x64）：
   `market_status` → `today=2026-11-14 / lastTradingDay=2026-11-13 /
-  session=weekend`；`minute sz301218` → `date=2026-11-13 /
-  prevClose=86.60 / 240 点`，末点 `15:00 = 99.86`；日线末三根
+session=weekend`；`minute sz301218` → `date=2026-11-13 /
+prevClose=86.60 / 240 点`，末点 `15:00 = 99.86`；日线末三根
   `11-11 94.97 / 11-12 86.60 / 11-13 99.86`。修复前同一份数据把昨收算成 99.86。
 - 新增回归：`test_tdx.TestMinuteTradingDate` 4 例 + `_manifest_day` 1 例；
   `realtime.test.ts` 3 例（周末不补 bar / 收盘后可补 / 开盘前不补）。
@@ -350,7 +544,7 @@ pythontdx 的所有重要变更都记录在这里。
   不再把另一只证券的数据标成请求代码。
 - **keyed 归档同日覆盖**：新增 `code_archive` 按代码/业务 key 分片，覆盖
   分时 5 类 + `block_meta/category_quotes/market_news/channel_news/f10_market/
-  f10_detail`；同一天不同 key 不再互相 `skipped`，列表接口兼容旧布局。
+f10_detail`；同一天不同 key 不再互相 `skipped`，列表接口兼容旧布局。
 - **全量翻页被短页截断**：`full_kline` / `delisted_history` 只在空页停止；
   服务端重复返回同一页时停止并标 `complete=false`，不静默截断。
 - **本地 `.day` 系数与残尾**：按代码段区分 A 股/沪 B/指数/基金/债券的价格与量
@@ -720,12 +914,12 @@ portable / `win-unpacked`，不会自动生成绿色目录或 zip。
 - AppImage 完成一次 1.6 GB 备份，进度条 **100%**（82/82 文件）；
 - 两个包内 `app.asar` 均含 `data:backup-progress` 与 35,149 字节 GPL 文本。
 
-| 产物 | 大小 | SHA256 |
-| --- | ---: | --- |
-| `pythontdx-0.14.4.AppImage` | 154,528,884 B | `a7567031faae1ff6bb2b333a64f79dc17d8a77a78bef8ea100e309aeea50762d` |
-| `pythontdx_0.14.4_amd64.deb` | 128,641,832 B | `2a8add0af11951180a021221a5e9e65e191cb60a333e9b7a55097657698c3ba5` |
-| `linux-unpacked/resources/app.asar` | 3,607,099 B | `71462c02bde14649a6f21d15609499890de43774e88ab0211b3498ee27fb74e1` |
-| `linux-unpacked/resources/tdx-bridge/tdx-bridge` | 28,461,264 B | `0f01f15092ed2c8b1718257eb3df537f75b2e58c2bcc4d90e663e40cb47bf084` |
+| 产物                                             |          大小 | SHA256                                                             |
+| ------------------------------------------------ | ------------: | ------------------------------------------------------------------ |
+| `pythontdx-0.14.4.AppImage`                      | 154,528,884 B | `a7567031faae1ff6bb2b333a64f79dc17d8a77a78bef8ea100e309aeea50762d` |
+| `pythontdx_0.14.4_amd64.deb`                     | 128,641,832 B | `2a8add0af11951180a021221a5e9e65e191cb60a333e9b7a55097657698c3ba5` |
+| `linux-unpacked/resources/app.asar`              |   3,607,099 B | `71462c02bde14649a6f21d15609499890de43774e88ab0211b3498ee27fb74e1` |
+| `linux-unpacked/resources/tdx-bridge/tdx-bridge` |  28,461,264 B | `0f01f15092ed2c8b1718257eb3df537f75b2e58c2bcc4d90e663e40cb47bf084` |
 
 ### 0x0547 增量刷新与推送队列（2026-11-02 盘中）
 

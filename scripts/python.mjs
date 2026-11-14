@@ -44,9 +44,9 @@ const args =
   command === 'test'
     ? ['-m', 'unittest', 'discover', '-s', 'python', '-p', 'test_*.py', '-v']
     : command === 'audit'
-      ? ['scripts/data_audit.py', '--json']
+      ? ['scripts/data/data_audit.py', '--json']
       : command === 'social'
-        ? ['scripts/social-preview.py']
+        ? ['scripts/dev/social-preview.py']
         : ['python/build.py']
 
 const result = spawnSync(executable, [...prefix, ...args], {

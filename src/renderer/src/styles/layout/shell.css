@@ -1,0 +1,709 @@
+/* ============================================================================
+   应用布局与业务组件样式
+   ========================================================================== */
+
+/* ============================================================== 应用骨架 */
+/*
+ * 三栏一屏布局：自选股 | 图表主区 | 盘口与指标
+ *
+ *   行：标题栏 / 内容区 / 状态栏
+ *   列：侧栏   / 主区(1fr) / 右栏
+ *
+ * 核心约束是「一屏放得下、不出现滚动条」：
+ *   · 整个 .app 高度锁死 100%，任何一层都不允许撑破视口；
+ *   · 只有图表卡片用 1fr 吸收剩余高度，其余部件都是内容高度；
+ *   · 需要自适应的地方（盘口行高、指标网格）用 flex/grid 的收缩能力处理，
+ *     而不是靠 overflow: auto 兜底。
+ */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--rail-w);
+  grid-template-rows: var(--titlebar-h) minmax(0, 1fr) var(--statusbar-h);
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 没有选中股票时，右栏整列收起，把空间让给空状态插画 */
+.app--empty {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
+}
+
+.app--empty .rail {
+  display: none;
+}
+
+/* 一键收起左侧「导航」；收起后由左缘的「导航 »」按钮恢复 */
+.app--sidebar-hidden {
+  grid-template-columns: 0 minmax(0, 1fr) var(--rail-w);
+}
+
+.app--sidebar-hidden .sidebar,
+.app--sidebar-hidden .layout-resizer--sidebar {
+  display: none;
+}
+
+/* ================================================================ 标题栏 */
+.titlebar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-left: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
+  /* 关键：整条标题栏可拖动窗口 */
+  -webkit-app-region: drag;
+}
+
+/* macOS 上要给原生红绿灯让位 */
+:root[data-platform='darwin'] .titlebar {
+  padding-left: 84px;
+}
+
+.titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.titlebar__logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--accent-grad);
+  box-shadow: 0 4px 12px -4px rgba(91, 140, 255, 0.9);
+}
+
+.titlebar__title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-1);
+}
+
+.titlebar__sub {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+}
+
+/* 中间的空白区域负责「吃掉」拖拽，同时把右侧按钮推到边上 */
+.titlebar__drag {
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+/*
+ * 主界面时钟：行情软件里「现在几点」比很多指标都关键。
+ * 固定显示北京时间；秒级刷新，等宽数字避免每秒左右抖动。
+ */
+.market-clock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  min-width: 104px;
+  padding: 0 var(--sp-3);
+  border-left: 1px solid var(--border);
+  -webkit-app-region: no-drag;
+}
+
+.market-clock__time {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.market-clock__pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--up);
+  box-shadow: 0 0 8px var(--up);
+  animation: pulse-dot 1.8s var(--ease-in-out) infinite;
+}
+
+.market-clock__meta {
+  display: flex;
+  gap: 6px;
+  font-size: var(--fs-2xs);
+  line-height: 1.1;
+  color: var(--text-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-clock__session {
+  color: var(--text-2);
+}
+
+@media (max-width: 1320px) {
+  /* 1280 窄屏优先保住秒级时间，日期可以收起 */
+  .market-clock__meta {
+    display: none;
+  }
+
+  .market-clock {
+    min-width: 82px;
+    padding: 0 var(--sp-2);
+  }
+
+  .market-clock__time {
+    font-size: 17px;
+  }
+}
+
+.titlebar__menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__link {
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  background: transparent;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.titlebar__link:hover {
+  color: var(--text-1);
+  background: var(--panel-hover);
+}
+
+.titlebar__badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: var(--r-full);
+  color: #fff;
+  background: var(--up);
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+}
+
+.titlebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: var(--sp-2);
+  /* 交互元素必须退出拖拽区域，否则点不动 */
+  -webkit-app-region: no-drag;
+}
+
+/* 全局工具按钮：数据 / 服务器 / 快捷键 / 设置 / 主题 / 预警 */
+.titlebar__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  background: transparent;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.titlebar__tool:hover {
+  color: var(--text-1);
+  background: var(--panel-hover);
+}
+
+.titlebar__tool .titlebar__badge {
+  position: static;
+  margin-left: 1px;
+}
+
+.titlebar__divider {
+  width: 1px;
+  height: 15px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+.win-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+/* ================================================================ 搜索框 */
+.search-wrap {
+  position: relative;
+  width: 300px;
+  -webkit-app-region: no-drag;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 30px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-full);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  transition:
+    border-color var(--dur-2) var(--ease),
+    background-color var(--dur-2) var(--ease),
+    box-shadow var(--dur-2) var(--ease);
+}
+
+.search:focus-within {
+  background: var(--panel-hover);
+  border-color: rgba(91, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search__icon {
+  flex: none;
+  color: var(--text-3);
+}
+
+.search__input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+
+.search__input::placeholder {
+  color: var(--text-3);
+}
+
+.search__spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.search-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: var(--sp-1);
+  border-radius: var(--r-md);
+  background: var(--panel-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: blur(26px);
+  animation: scale-in var(--dur-2) var(--ease);
+}
+
+.search-pop__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.search-pop__item:hover,
+.search-pop__item[data-cursor='true'] {
+  background: var(--panel-hover);
+}
+
+.search-pop__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-pop__code {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.search-pop__empty {
+  padding: var(--sp-4);
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ================================================================ 侧边栏 */
+.sidebar {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 40%);
+}
+
+/* 侧栏开关与「行情/异动」同字号；标题由按钮文本提供，不再用 ::after 补 11px 小字 */
+
+.sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+}
+
+.sidebar__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+/* -------------------------------------------------------- 分组标签 */
+.group-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: none;
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+
+/* 自定义板块视图里的板块标签（自选股已经没有分组标签） */
+.group-tabs--custom {
+  padding-top: 2px;
+}
+
+.group-tabs__hint {
+  align-self: center;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.group-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-full);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease),
+    opacity var(--dur-2) var(--ease);
+}
+
+/* 正在被拖动的分组标签淡出，明确指出搬的是它 */
+.group-chip--dragging {
+  opacity: 0.4;
+}
+
+/* 分组排序的落点：贴一条竖线在目标标签的左/右侧 */
+.group-chip--drop-before::before,
+.group-chip--drop-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(91, 140, 255, 0.85);
+}
+
+.group-chip--drop-before::before {
+  left: -3px;
+}
+
+.group-chip--drop-after::after {
+  right: -3px;
+}
+
+.group-chip:hover {
+  color: var(--text-1);
+  background: var(--panel-hover);
+}
+
+.group-chip[data-active='true'] {
+  color: var(--text-1);
+  background: var(--panel-active);
+  border-color: rgba(91, 140, 255, 0.36);
+}
+
+/* 拖拽悬停到分组上时的落点提示 */
+.group-chip--drop {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.group-chip__count {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.group-chip__close {
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  margin-right: -2px;
+  border-radius: 50%;
+  color: var(--text-3);
+  opacity: 0;
+  transition:
+    opacity var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+
+.group-chip:hover .group-chip__close {
+  opacity: 1;
+}
+
+.group-chip__close:hover {
+  color: #fff;
+  background: var(--up);
+}
+
+.group-chip__input {
+  width: 62px;
+  font-size: var(--fs-2xs);
+  color: var(--text-1);
+}
+
+.group-empty {
+  padding: var(--sp-6) var(--sp-4);
+  text-align: center;
+  font-size: var(--fs-xs);
+  line-height: 1.9;
+  color: var(--text-3);
+}
+
+.sidebar__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--sp-2) var(--sp-3);
+}
+
+.sidebar__foot {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  line-height: 1.7;
+}
+
+/* ------------------------------------------------------------ 自选股行 */
+.watch-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px minmax(58px, auto) 20px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px;
+  margin-bottom: 1px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  text-align: left;
+  transition:
+    background-color var(--dur-2) var(--ease),
+    border-color var(--dur-2) var(--ease),
+    opacity var(--dur-2) var(--ease);
+}
+
+/* 拖拽中的行淡出，明确指出「正在搬这一行」 */
+.watch-row--dragging {
+  opacity: 0.4;
+}
+
+/* 落点指示线：插到这一行前面 / 后面 */
+.watch-row--drop-before::after,
+.watch-row--drop-after::after {
+  content: '';
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(91, 140, 255, 0.8);
+}
+
+.watch-row--drop-before::after {
+  top: -1px;
+}
+
+.watch-row--drop-after::after {
+  bottom: -1px;
+}
+
+.watch-row:hover {
+  background: var(--panel-hover);
+}
+
+.watch-row--active {
+  background: var(--panel-active);
+  border-color: rgba(91, 140, 255, 0.32);
+}
+
+/* 选中态左侧的高亮竖条 */
+.watch-row--active::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 22px;
+  border-radius: var(--r-full);
+  background: var(--accent-grad);
+}
+
+.watch-row__main {
+  min-width: 0;
+}
+
+.watch-row__name {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-1);
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.watch-row--long-name .watch-row__name {
+  font-size: 12px;
+}
+
+.watch-row__code {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+}
+
+/* 迷你走势图：固定 46px 槽位，数据未到也不让右侧价格列移动 */
+.watch-row__spark-slot {
+  width: 46px;
+  min-width: 46px;
+  height: 20px;
+}
+
+.watch-row .sparkline {
+  width: 46px !important;
+  min-width: 46px;
+  max-width: 46px;
+  height: 20px;
+  opacity: 0.95;
+  transition: opacity var(--dur-2) var(--ease);
+}
+
+.watch-row:hover .sparkline {
+  opacity: 1;
+}
+
+.watch-row__nums {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  min-width: 58px;
+  text-align: right;
+}
+
+.watch-row__price {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.15;
+  border-radius: var(--r-xs);
+  padding: 0 3px;
+}
+
+.watch-row__chg {
+  font-size: var(--fs-2xs);
+  line-height: 1.15;
+}
+
+/* 竞价兜底价：只标注「竞价」，不伪造涨跌幅 */
+.watch-row__chg--auction {
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+}
+
+.watch-row__price--up {
+  animation: flash-up 700ms var(--ease) both;
+}
+
+.watch-row__price--down {
+  animation: flash-down 700ms var(--ease) both;
+}
+
+.watch-row__remove {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: var(--r-xs);
+  color: var(--text-3);
+  opacity: 0;
+  transition:
+    opacity var(--dur-2) var(--ease),
+    color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+
+.watch-row:hover .watch-row__remove {
+  opacity: 1;
+}
+
+.watch-row__remove:hover {
+  color: var(--up);
+  background: var(--up-soft);
+}
+

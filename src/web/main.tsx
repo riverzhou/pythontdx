@@ -1,9 +1,6 @@
-import { createHttpApi } from './http-api'
-import { migrateLegacyLocalStorage } from '../renderer/src/lib/legacy-storage'
-
-// 先迁移旧 key，再创建 Web 状态客户端（它会读取 pythontdx:web:state）。
-migrateLegacyLocalStorage()
-
-// 先装好 window.api，再加载共享渲染层：lib/ipc.ts 在模块顶层读取 window.api
-window.api = createHttpApi()
-await import('../renderer/src/main')
+/**
+ * Web 入口：与 Electron 使用同一份渲染层、同一套 HTTP 数据面。
+ *
+ * 不再注入 `window.api`；桌面壳能力由 `window.desktop` 提供（浏览器没有）。
+ */
+import '../renderer/src/main'

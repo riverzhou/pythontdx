@@ -1,0 +1,634 @@
+/* ================================================================ 主工作区 */
+.workspace {
+  grid-row: 2;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--edge) var(--gutter) var(--edge) var(--edge);
+  /* 关键：不滚动。内容超出时由内部组件自己收缩，而不是长出滚动条 */
+  overflow: hidden;
+}
+
+/* ============================================================== 右侧栏 */
+.rail {
+  grid-row: 2;
+  grid-column: 3;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+  min-height: 0;
+  padding: var(--edge) var(--edge) var(--edge) 0;
+  overflow: hidden;
+}
+
+/* ============================================================== 行情头部 */
+.quote-header {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) var(--sp-3);
+}
+
+.quote-header__top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.quote-header__identity {
+  min-width: 0;
+}
+
+.quote-header__name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--text-1);
+}
+
+.quote-header__code {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+}
+
+.quote-header__price-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px var(--sp-4);
+  margin-left: auto;
+  text-align: right;
+}
+
+/* 集合竞价虚拟撮合价：只在 09:15–09:25 出现，不替代正式成交价 */
+.quote-header__auction {
+  flex: 0 0 100%;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.quote-header__price {
+  font-size: var(--fs-3xl);
+  font-weight: 600;
+  line-height: 1;
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.quote-header__price--up {
+  animation: flash-up 800ms var(--ease) both;
+}
+
+.quote-header__price--down {
+  animation: flash-down 800ms var(--ease) both;
+}
+
+.quote-header__delta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.quote-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 头部下方的一排关键指标：固定 12 列，保证 1440×900 下不换行 */
+.quote-metrics {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 4px 6px;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.metric__label {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.metric__value {
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1360px) {
+  .quote-metrics {
+    gap: 2px 4px;
+  }
+
+  .metric__label {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+
+  .metric__value {
+    font-size: 10px;
+  }
+}
+
+/* ================================================================ 图表卡 */
+.chart-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* 唯一吸收剩余高度的部件：图表永远填满主区剩下的空间 */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.chart-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.chart-card__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-1);
+}
+
+.chart-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+/* 标题区右侧容器：图例与十字光标读数共用同一块位置 */
+.chart-headline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+/* 十字光标联动读数：鼠标在图上移动时替换掉图例 */
+.chart-readout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  min-width: 0;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  animation: fade-in var(--dur-1) var(--ease);
+}
+
+.chart-readout__time {
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+}
+
+.chart-readout__price {
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+
+.chart-readout__pct {
+  font-weight: 600;
+}
+
+.chart-readout__item b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.chart-legend__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.chart-legend__swatch {
+  width: 12px;
+  height: 2px;
+  border-radius: var(--r-full);
+}
+
+.chart-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  /* 不设 min-height：高度完全由卡片决定，避免把主区顶出滚动条 */
+  min-height: 0;
+}
+
+/* 图表用滚轮/方向键操作，不要绘制焦点框；键盘归属仍由 aria-label 与快捷键说明表达 */
+.chart-host:focus,
+.chart-host:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-radius: var(--r-sm);
+}
+
+.chart-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.chart-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+/* ---------------------------------------------------- 图表加载骨架屏 */
+/*
+ * 首屏拉数据时，图表组件拿不到值就不渲染，主区会是一整块空白 ——
+ * 看起来像界面坏了。这里用 CSS 拼出「图表的形状」，让等待过程可预期。
+ */
+.chart-skeleton {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.chart-skeleton__grid {
+  position: absolute;
+  top: 18px;
+  right: 52px;
+  bottom: 78px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.chart-skeleton__line {
+  height: 1px;
+  background: var(--chart-grid);
+}
+
+.chart-skeleton__area {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: var(--r-sm);
+  opacity: 0.55;
+}
+
+.chart-skeleton__volume {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  flex: none;
+  height: 21%;
+  min-height: 40px;
+}
+
+.chart-skeleton__bar {
+  flex: 1 1 0;
+  min-width: 1px;
+  border-radius: 1px;
+  opacity: 0.5;
+}
+
+/* ============================================================ 右栏面板 */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 盘口面板吃掉右栏剩余空间 */
+.panel--book {
+  flex: 1 1 auto;
+}
+
+/* 五档在上、逐笔/指标在下，上下两段固定分配 */
+.rail--stacked .panel--book {
+  flex: 0 0 auto;
+}
+
+.rail--stacked .panel--book .panel__body {
+  min-height: 300px;
+}
+
+.panel--detail {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.panel--detail .stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 固定 30px 行高：不再用 1fr 把 9 行摊满整个面板，底部留白 */
+  grid-auto-rows: 30px;
+  gap: 0 14px;
+  align-content: start;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.panel--detail .stats__item {
+  padding: 0 4px;
+}
+
+.panel--detail .stats__label {
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.panel--detail .stats__value {
+  font-size: 12px;
+}
+
+/* 指标面板按内容高度，放在右栏底部 */
+.panel--stats {
+  flex: none;
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel__body {
+  padding: var(--sp-3) var(--sp-4) var(--sp-3);
+}
+
+/* 盘口主体：让每档行按可用高度均分，既不溢出也不留大片空白 */
+.panel__body--fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* ================================================================ 五档盘口 */
+.orderbook {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 0;
+}
+
+/*
+ * 每一档用 flex: 1 1 0 均分可用高度：
+ * 窗口变矮时行会一起变矮（保底 18px），变高时均匀撑开，
+ * 这样既不会溢出长出滚动条，也不会在底部留一大块空白。
+ */
+.ob-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1 1 0;
+  min-height: 18px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-xs);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+}
+
+.ob-row__label {
+  position: relative;
+  z-index: 1;
+  color: var(--text-3);
+}
+
+.ob-row__price {
+  position: relative;
+  z-index: 1;
+  font-weight: 600;
+}
+
+.ob-row__vol {
+  position: relative;
+  z-index: 1;
+  color: var(--text-2);
+  text-align: right;
+  min-width: 56px;
+}
+
+/* 挂单量占比条：从右向左生长，视觉上靠近价格轴 */
+.ob-row__bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  right: 0;
+  width: var(--w, 0%);
+  border-radius: var(--r-xs);
+  transition: width var(--dur-3) var(--ease);
+}
+
+.ob-row--ask .ob-row__bar {
+  background: var(--up-soft);
+}
+
+.ob-row--bid .ob-row__bar {
+  background: var(--down-soft);
+}
+
+.ob-spread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  margin: var(--sp-1) 0;
+  padding: var(--sp-2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.ob-spread__value {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+/* ================================================================ 指标网格 */
+/* 右栏只有 300 多像素宽，固定两列比 auto-fit 更可控 */
+/*
+ * 指标面板：两列固定行高的「标签 … 数值」行。
+ *
+ * 以前是「标签在上、数值在下」+ 6px 行距，17 项铺成 9 行后间距忽大忽小；
+ * 用户要求排列整齐、间距恰当，底部留白可以接受。这里改成等距行、顶部对齐，
+ * 容器不再拉伸，最后一行不满就空着。
+ */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+  align-content: start;
+  padding: 2px 0 0;
+}
+
+.stats__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.stats__label {
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stats__value {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+/* ================================================================ 状态栏 */
+.statusbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-4);
+  border-top: 1px solid var(--border);
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.03), transparent);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.statusbar__group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.statusbar__spacer {
+  flex: 1;
+}
+
+.statusbar__text {
+  letter-spacing: 0.03em;
+}
+
+.statusbar__error {
+  color: var(--up);
+}
+
+.statusbar__btn {
+  height: 20px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-xs);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  transition:
+    color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+
+.statusbar__btn:hover {
+  color: var(--text-1);
+  background: var(--panel-hover);
+}
+
+.statusbar__btn[data-active='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.statusbar__file {
+  display: none;
+}
+
+/* ================================================================ 空状态 */
+.empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  min-height: 0;
+  text-align: center;
+}
+
+.empty__art {
+  width: 128px;
+  height: 128px;
+  opacity: 0.9;
+}
+
+.empty__title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.empty__desc {
+  max-width: 340px;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  line-height: 1.8;
+}
+
+/* ============================================================== 加载占位 */
+.loading-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+}
+

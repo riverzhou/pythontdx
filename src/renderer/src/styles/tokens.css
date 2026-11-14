@@ -13,6 +13,8 @@
   --font-num:
     'Bahnschrift', 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', ui-monospace,
     'Cascadia Mono', monospace;
+  /* 代码/调试文本用的真等宽字体；不要复用行情数字字体 */
+  --font-mono: 'Cascadia Mono', 'SFMono-Regular', Consolas, ui-monospace, monospace;
 
   --fs-2xs: 11px;
   --fs-xs: 12px;
@@ -48,13 +50,18 @@
   --dur-3: 320ms;
 
   /* ------------------------------------------------------------ 布局尺寸 */
-  --titlebar-h: 44px;
-  --statusbar-h: 28px;
+  --titlebar-h: 38px;
+  --statusbar-h: 24px;
   --sidebar-w: 264px;
   /* 右侧盘口/指标栏。整体是「自选 | 图表 | 盘口」三栏，保证一屏放下 */
-  --rail-w: 318px;
-  --gutter: 12px;
-  --edge: 14px;
+  --rail-w: 300px;
+  --gutter: 8px;
+  --edge: 8px;
+  /* 兼容旧组件引用的语义别名，统一指向主题令牌 */
+  --panel-2: var(--panel-hover);
+  --accent-border: rgba(91, 140, 255, 0.35);
+  --danger: var(--up);
+  --shadow-lg: var(--shadow-3);
 
   /* 个股二级窗口（F10/板块/市场/龙虎榜…）统一尺寸 */
   --panel-w: 96vw;
@@ -156,6 +163,7 @@
 
   --accent: #2f6bff;
   --accent-soft: rgba(47, 107, 255, 0.12);
+  --accent-border: rgba(47, 107, 255, 0.35);
   --accent-2: #8b5cf6;
   --accent-grad: linear-gradient(135deg, #2f6bff 0%, #8b5cf6 100%);
 

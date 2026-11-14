@@ -11,7 +11,7 @@
 > 因此本文 pythontdx 侧行号**只能当近似值**（±120 行都可能漂移），**复核请以函数名 grep 为准**；
 > eltdx 侧未被改动，行号稳定。凡「快照行号」明显过期处，以函数名为准即可，不影响结论。
 >
-> 方法：静态阅读 + `grep` 常量/请求构造/解析函数/落盘调用 + 运行现有离线单测（`python -m pytest python/test_protocol_extra.py python/test_local.py`，16 passed）。
+> 方法：静态阅读 + `grep` 常量/请求构造/解析函数/落盘调用 + 运行现有离线单测（`python -m pytest python/tests/test_protocol_extra.py python/tests/test_local.py`，16 passed）。
 > 未联网抓包、未安装 eltdx、未运行 Rust；凡未实测的语义均标「未验证」。
 >
 > **许可**：eltdx 采用自定义「非商业学习与数据研究」许可（`D:\GitHub\eltdx\LICENSE`），
@@ -22,7 +22,7 @@
 
 | 审计项 | 状态 | 落点 |
 | --- | --- | --- |
-| P0-1 `0x054c` 记录头校验 | ✅ 已修 | `_split_quote_records` / `parse_snapshots`；`test_p0_fixes.py` |
+| P0-1 `0x054c` 记录头校验 | ✅ 已修 | `_split_quote_records` / `parse_snapshots`；`test_archive_regressions.py` |
 | P0-2 分时 5 类 keyed 归档 | ✅ 已修 | `python/code_archive.py` + 5 个 `*_archive_save` |
 | P0-2b 其余 6 类 keyed 归档 | ✅ 已修 | block_meta/category_quotes/market_news/channel_news/f10_market/f10_detail |
 | P0-3 短页截断 | ✅ 已修 | `full_kline` / `delisted_history` 只在空页停，重复页标 `complete=false` |
@@ -284,7 +284,7 @@ pythontdx 的实际读取顺序见 `tdx_bridge.py:1049-1130`：`_u16` 交易状�
 | 内盘/外盘 | `quotes.rs:220-221` | **读了但没挂到 quote**（与 0x0547 不一致） | 字段静默丢失 |
 
 **复现路径**：`parse_snapshots(body, [(0,'600519'),(0,'000001')], ...)`，若服务端只返回 `000001` 的记录且 `count=1`，
-pythontdx 会把它当 `600519` 返回。现有测试只覆盖 2 条正常记录（`python/test_tdx.py:164`），未覆盖该分支。
+pythontdx 会把它当 `600519` 返回。现有测试只覆盖 2 条正常记录（`python/tests/test_tdx.py:164`），未覆盖该分支。
 
 ### 3.5 `0x0547` 增量刷新
 
@@ -855,7 +855,7 @@ grep -n "^CMD_" D:/GitHub/pythontdx/python/tdx_bridge.py
 # 3) dispatch 入口数
 grep -c 'if cmd == ' D:/GitHub/pythontdx/python/tdx_bridge.py
 # 4) 离线单测（本次跑过）
-cd D:/GitHub/pythontdx && python -m pytest python/test_protocol_extra.py python/test_local.py -q
+cd D:/GitHub/pythontdx && python -m pytest python/tests/test_protocol_extra.py python/tests/test_local.py -q
 # 5) 归档幂等键证据
 grep -n "manifest.json" D:/GitHub/pythontdx/python/protocol_archive.py
 ```
