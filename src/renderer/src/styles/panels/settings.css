@@ -699,11 +699,27 @@
   border-radius: 6px;
 }
 
-.chart-toolbar--secondary {
-  gap: 10px;
+/* 图表工具常驻在标题行里：排在 指标/公式/复盘 左侧，不折叠、不弹层 */
+.chart-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* 同一组内只留一点缝（按钮自己有 7px 内边距）；组与组之间靠下面的 margin 拉开 */
+  gap: 4px;
+  min-width: 0;
 }
 
-.chart-toolbar--secondary .chip {
+/* 复权是带边框的分段控件，右侧多留一份缝，和右边的开关区分开 */
+.chart-tools > .chart-adjust-group {
+  margin-right: 8px;
+}
+
+/* 分时/五日没有工具：空容器不占位，否则会多出一份行间距 */
+.chart-tools:empty {
+  display: none;
+}
+
+.chart-tools .chip {
   color: var(--text-2);
 }
 

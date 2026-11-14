@@ -88,10 +88,6 @@
   border-bottom: 1px solid var(--border);
 }
 
-.chart-toolbar--secondary {
-  align-items: center;
-}
-
 /* 副图下拉：不要用系统白底，跟随深/浅主题并保证字色对比 */
 .chart-sub-select,
 .chart-ext-select {
@@ -142,9 +138,7 @@
 }
 
 .chart-headline {
-  margin-left: auto;
   flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .chart-headline .btn--bare {
@@ -789,10 +783,6 @@ select optgroup {
     grid-template-columns: 0 minmax(0, 1fr) 272px;
   }
 
-  .quote-metrics {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
   .titlebar__title {
     display: none;
   }
@@ -927,7 +917,7 @@ select optgroup {
 }
 
 .quote-metrics {
-  gap: 2px 6px;
+  /* 列间距与字号统一在 layout/workspace.css 按宽度分档，这里只收上边距 */
   padding-top: 5px;
 }
 
@@ -935,13 +925,9 @@ select optgroup {
   gap: 0;
 }
 
+/* 标签字号沿用基础层的 11px；这里只去掉字距，值在 workspace.css 里统一给 16px */
 .metric__label {
-  font-size: 9px;
   letter-spacing: 0;
-}
-
-.metric__value {
-  font-size: 12px;
 }
 
 .chart-card__head {
@@ -955,10 +941,6 @@ select optgroup {
 
 .chart-toolbar--primary {
   padding-bottom: 3px;
-}
-
-.chart-toolbar--secondary {
-  padding-top: 1px;
 }
 
 .segmented {
@@ -982,7 +964,8 @@ select optgroup {
 }
 
 .chart-headline {
-  gap: 8px;
+  /* 组间距沿用基础层的 12px（状态 / 工具 / 读数 / 操作 四组） */
+  gap: var(--sp-3);
 }
 
 .chart-card__body {
@@ -1083,18 +1066,6 @@ select optgroup {
   font-size: 10px;
 }
 
-.chart-tools-toggle {
-  margin-left: auto;
-}
-
-.chart-toolbar--collapsed {
-  display: none;
-}
-
-.metric__value {
-  font-size: 11px;
-}
-
 .rail--stacked .panel--book {
   min-height: 0;
 }
@@ -1184,10 +1155,6 @@ select optgroup {
 .ranking__tab {
   padding: 4px 10px;
   font-size: 11px;
-}
-
-.chart-headline__meta {
-  margin-right: auto;
 }
 
 /* 主区标签页的页头也按行情终端密度收口，把高度留给表格/图表。 */

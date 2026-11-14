@@ -12,6 +12,20 @@ export function toneColorVar(tone: Tone): string {
 }
 
 /**
+ * 行情头那一排价格指标（今开 / 最高 / 最低 / 均价）的涨跌色。
+ *
+ * **基准只能是昨收**：最高价不是天然「涨」、最低价也不是天然「跌」——
+ * 跳空低开一整天时最高价仍在昨收之下（应为绿），跳空高开时最低价仍在昨收之上（应为红）。
+ * 以前这两格硬编码 up/down，于是会出现「全天下跌、最高却标红」的自相矛盾。
+ * 昨收无效（停牌首日、缺字段）时一律给平，不猜颜色。
+ */
+export function toneVsPrevClose(value: number | null | undefined, prevClose: number): Tone {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'flat'
+  if (!(prevClose > 0) || !Number.isFinite(prevClose)) return 'flat'
+  return toneOf(value - prevClose)
+}
+
+/**
  * 图表折线用的颜色。
  * 比文字色略亮一档（`--up-line` / `--down-line`），
  * 因为细线在深色背景上需要更高的对比度才看得清。

@@ -106,7 +106,7 @@
 ```bash
 npm run dev                 # 开发模式（主进程重启 + 渲染层热更新 + Python 桥接）
 npm run check               # 类型 + Lint + TS 测试 + Python 测试，一条命令
-npm run test                # 只跑 TS 测试（359 个用例）
+npm run test                # 只跑 TS 测试（367 个用例）
 npm run test:python         # 只跑 Python 协议/HTTP 测试（343 个用例）
 npm run audit:data          # 数据覆盖自检（39 项，会触发自动归档；清单见 docs/12）
 npm run audit:docs          # 文档自检：链接/截图/路径引用 + 客户端与服务端路由一致性
@@ -190,7 +190,7 @@ docs/            说明文档；入口 docs/README.md，发布说明在 docs/rel
 
 ## 五、当前阶段
 
-**v2.0.1：技术债清算 + 信息密度 + 通讯统一。**
+**v2.0.2：图表头收拢（工具常驻 + 更新时间去掉）+ 通讯统一。**
 部署模式：**Electron 桌面与 Web 二选一，不同时使用**；同机只允许一个 Python 后端持有 7709 连接（`PRINCIPLES.md` A6）。
 数据面：两端都走本地 HTTP `/api` + `/ws`；桌面 `window.desktop` 只保留壳能力。
 界面：行情相关显示全部进主工作区标签页（排行榜、板块、全市场、多股同列、选股、
@@ -205,9 +205,9 @@ docs/            说明文档；入口 docs/README.md，发布说明在 docs/rel
 逐项映射与核对表见 `docs/23-前后端边界与双端一致性.md`；Web/Electron 界面差异见
 `docs/22` §4.4。
 
-健康度 `npm run check` 全绿（359 个 TS 通过 + 1 skipped；343 个 Python，1 skipped）。
+健康度 `npm run check` 全绿（367 个 TS 通过 + 1 skipped；343 个 Python，1 skipped）。
 2.0.x 新增：信息密度版布局、服务端面板推送 `/api/push`、备份进度 `/api/progress`、
-图表工具默认收起、估值行；导航改版（去四菜单：左栏「导航」/ 右上角工具 / 「+」页面
+估值行、图表工具常驻标题行（不折叠、不另占行，更新时间不再做成徽标）；导航改版（去四菜单：左栏「导航」/ 右上角工具 / 「+」页面
 选择器）、表头 sticky 与列宽优化、公告与 F10 同宽、逐笔明细多列整页 + 自动滚屏 +
 红买/绿卖彩色系统、指标面板等距行、默认最大化 + 还原 1440×900；
 TD10/11/13/19/21/22/23 已偿还。

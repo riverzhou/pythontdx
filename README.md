@@ -8,9 +8,9 @@ Electron + SolidJS 双前端，Python 负责行情、离线数据与面向机器
 [**⬇ 下载最新 Release**](https://github.com/riverzhou/pythontdx/releases/latest) ·
 [功能](#功能) · [快速开始](#快速开始) · [截图](#截图) · [文档](#文档)
 
-**v2.0.1（源码，已发布）** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64  
+**v2.0.2（源码，已发布）** · GPL-3.0-or-later · Windows x64 / macOS arm64 / Linux x64  
 [![check](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml/badge.svg)](https://github.com/riverzhou/pythontdx/actions/workflows/check.yml)
-· `npm run check` 359 TS + 343 Python 全绿
+· `npm run check` 367 TS + 343 Python 全绿
 
 `Electron` · `Vite` · `SolidJS` · `TypeScript` · `Python` · `Parquet / DuckDB` · `7709 / MAC / 7615`
 
@@ -520,9 +520,9 @@ everything local as Parquet (ZSTD) with manifests and SHA-256 checksums.
   `trade_date` partitions, point-in-time F10 snapshots, delisted/suspended symbols kept.
 - **Scope on purpose**: A-shares only — no HK/US/futures/options, no Level-2, no order
   routing, and no third-party data vendors as fallback.
-- **Status**: 2.0.1 source (released) · GPL-3.0-or-later ·
+- **Status**: 2.0.2 source (released) · GPL-3.0-or-later ·
   Windows x64 / macOS arm64 / Linux x64 ·
-  `npm run check` green (359 TS + 343 Python tests).
+  `npm run check` green (367 TS + 343 Python tests).
 
 Download: [Releases](https://github.com/riverzhou/pythontdx/releases/latest).
 Run from source: `npm install && python -m pip install -r requirements.txt && npm run dev`.

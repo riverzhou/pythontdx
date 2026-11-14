@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sparklineTone, toneColorVar, toneLineVar, toneOf } from './tone'
+import { sparklineTone, toneColorVar, toneLineVar, toneOf, toneVsPrevClose } from './tone'
 
 describe('toneOf', () => {
   it('正数涨、负数跌、零与无效值一律平', () => {
@@ -10,6 +10,30 @@ describe('toneOf', () => {
     expect(toneOf(undefined)).toBe('flat')
     expect(toneOf(NaN)).toBe('flat')
     expect(toneOf(Infinity)).toBe('flat')
+  })
+})
+
+describe('toneVsPrevClose（行情头那一排指标）', () => {
+  it('今开/最高/最低/均价一律以昨收为基准', () => {
+    expect(toneVsPrevClose(101, 100)).toBe('up')
+    expect(toneVsPrevClose(99, 100)).toBe('down')
+    expect(toneVsPrevClose(100, 100)).toBe('flat')
+  })
+
+  it('跳空低开一整天：最高仍在昨收之下 → 绿，不能硬编码成红', () => {
+    // 昨收 100，全天最高 97、最低 92：两个数相对昨收都是跌
+    expect(toneVsPrevClose(97, 100)).toBe('down')
+    expect(toneVsPrevClose(92, 100)).toBe('down')
+  })
+
+  it('跳空高开一整天：最低仍在昨收之上 → 红', () => {
+    expect(toneVsPrevClose(105, 100)).toBe('up')
+  })
+
+  it('缺值 / 昨收无效时给平，不抛异常', () => {
+    expect(toneVsPrevClose(undefined, 100)).toBe('flat')
+    expect(toneVsPrevClose(NaN, 100)).toBe('flat')
+    expect(toneVsPrevClose(101, 0)).toBe('flat')
   })
 })
 

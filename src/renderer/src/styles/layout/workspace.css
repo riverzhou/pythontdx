@@ -109,11 +109,17 @@
   gap: var(--sp-2);
 }
 
-/* 头部下方的一排关键指标：固定 12 列，保证 1440×900 下不换行 */
+/*
+ * 头部下方的一排关键指标：按内容宽度 + 固定列间距排，不拉成等分格。
+ * 宽度分档的硬约束是**最宽的行情**：深证成指（10968.79）在 16px 下整排要 ~1010px，
+ * 而 1440×900 窗口的行情头只有 ~833px 可用——所以 1660px 以下降到 14px/14px，
+ * 保证任何指数在最低支持分辨率下都只占一行（用户 2026-11-14 报过指数折行）。
+ */
 .quote-metrics {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 4px 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px var(--sp-6);
   padding-top: var(--sp-3);
   border-top: 1px solid var(--border);
 }
@@ -133,7 +139,7 @@
 }
 
 .metric__value {
-  font-size: var(--fs-sm);
+  font-size: 16px;
   font-weight: 550;
   color: var(--text-1);
   white-space: nowrap;
@@ -142,18 +148,36 @@
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 1360px) {
-  .quote-metrics {
-    gap: 2px 4px;
-  }
+/*
+ * 涨跌色必须盖过上面的中性色：base.css 里的 .up/.down 与本规则同权重，
+ * 而本文件在后面加载——不加这两条，指标永远只有白色（用户 2026-11-14 报过）。
+ */
+.metric__value.up {
+  color: var(--up);
+}
 
-  .metric__label {
-    font-size: 10px;
-    letter-spacing: 0;
+.metric__value.down {
+  color: var(--down);
+}
+
+/*
+ * 1440–1660：字号保持最大值 16px，只把列间距收到 10px。
+ * 依据：深证成指（最宽）16px 下整排 ~688px + 11 个 10px 间距 = 797px ≤ 1440 档的 833px，
+ * 留 36px 余量给「成交额/成交量」多一位数字的情况。
+ */
+@media (max-width: 1660px) {
+  .quote-metrics {
+    gap: 2px 10px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .quote-metrics {
+    gap: 2px 8px;
   }
 
   .metric__value {
-    font-size: 10px;
+    font-size: 14px;
   }
 }
 
@@ -193,14 +217,23 @@
   color: var(--text-3);
 }
 
-/* 标题区右侧容器：图例与十字光标读数共用同一块位置 */
+/* 标题行：工具从左往右排，操作组靠右，读数跟在工具后面 */
 .chart-headline {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   flex: 1 1 auto;
   min-width: 0;
-  justify-content: flex-end;
+  justify-content: flex-start;
+}
+
+/* 指标/公式/复盘/置顶/导出/刷新：用 auto 外边距顶到右边缘 */
+.chart-headline__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  min-width: 0;
 }
 
 /* 十字光标联动读数：鼠标在图上移动时替换掉图例 */

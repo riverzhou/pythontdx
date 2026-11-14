@@ -120,8 +120,6 @@ export function ChartPanel(props: ChartPanelProps): JSX.Element {
   const [showAverages, setShowAverages] = createSignal(appState.settings.showAverages ?? true)
   const [snapDrawings, setSnapDrawings] = createSignal(appState.settings.snapDrawings ?? true)
   const [drawMenuOpen, setDrawMenuOpen] = createSignal(false)
-  /** 二级图表工具默认收起：把高度让给主图，需要时一键展开。 */
-  const [toolsOpen, setToolsOpen] = createSignal(false)
   const [subIndicator, setSubIndicator] = createSignal<'none' | SubIndicator>(
     appState.settings.subIndicator ?? 'none'
   )
@@ -658,275 +656,14 @@ export function ChartPanel(props: ChartPanelProps): JSX.Element {
               <option value="sar">SAR</option>
             </select>
           </Show>
-
-          <button
-            class="chip chart-tools-toggle"
-            data-active={toolsOpen()}
-            title={toolsOpen() ? '收起图表工具' : '展开图表工具：复权/均线/BOLL/画线/副图'}
-            onClick={() => setToolsOpen((value) => !value)}
-          >
-            工具
-          </button>
         </div>
 
-        <div
-          class="chart-toolbar chart-toolbar--secondary"
-          classList={{ 'chart-toolbar--collapsed': !toolsOpen() }}
-        >
-          {/* 指数没有复权概念，隐藏复权档位；否则点「前复权」看起来像生效了，其实没意义 */}
-          <Show when={!isTrend() && !isIndexCode(props.code)}>
-            <div class="chart-adjust-group">
-              <For
-                each={[
-                  { value: 'none' as KLineAdjust, label: '不复权' },
-                  { value: 'qfq' as KLineAdjust, label: '前复权' },
-                  { value: 'hfq' as KLineAdjust, label: '后复权' }
-                ]}
-              >
-                {(item) => (
-                  <button
-                    class={`chip chart-adjust chart-adjust--${item.value}`}
-                    data-active={adjust() === item.value}
-                    onClick={() => {
-                      setAdjust(item.value)
-                      updateSettings({ klineAdjust: item.value })
-                      setHover(null)
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                )}
-              </For>
-            </div>
-          </Show>
-
-          <Show when={!isTrend()}>
-            <button
-              class="chip chart-ma"
-              data-active={showAverages()}
-              title="均线显示（默认开启）"
-              onClick={() => {
-                const next = !showAverages()
-                setShowAverages(next)
-                updateSettings({ showAverages: next })
-              }}
-            >
-              均线
-            </button>
-            <button
-              class="chip chart-boll"
-              data-active={showBoll()}
-              title="布林线叠加（默认关闭）"
-              onClick={() => {
-                const next = !showBoll()
-                setShowBoll(next)
-                updateSettings({ showBoll: next })
-              }}
-            >
-              BOLL
-            </button>
-          </Show>
-
-          <Show when={!isTrend()}>
-            <button
-              class="chip chart-log"
-              data-active={logScale()}
-              onClick={() => {
-                const next = !logScale()
-                setLogScale(next)
-                updateSettings({ logScale: next })
-              }}
-            >
-              {logScale() ? '对数' : '线性'}
-            </button>
-          </Show>
-
-          <Show when={!isTrend()}>
-            <div class="chart-draw">
-              <button
-                class="chip chart-draw-toggle"
-                data-active={showDrawings()}
-                title="画线：默认隐藏，打开后可选择工具"
-                onClick={() => setDrawMenuOpen((value) => !value)}
-              >
-                画线
-              </button>
-              <Show when={drawMenuOpen()}>
-                <div class="chart-draw-menu">
-                  <label class="chart-draw-menu__show">
-                    <input
-                      type="checkbox"
-                      checked={showDrawings()}
-                      onChange={(event) => {
-                        const next = event.currentTarget.checked
-                        setShowDrawings(next)
-                        if (!next) setDrawMode('none')
-                        updateSettings({ showDrawings: next })
-                      }}
-                    />
-                    显示画线
-                    <span class="chart-draw-menu__snap">
-                      <input
-                        type="checkbox"
-                        checked={snapDrawings()}
-                        onChange={(event) => {
-                          const next = event.currentTarget.checked
-                          setSnapDrawings(next)
-                          updateSettings({ snapDrawings: next })
-                        }}
-                      />
-                      吸附
-                    </span>
-                  </label>
-                  <div class="chart-draw-menu__tools">
-                    <button
-                      class="chip chart-draw-horizontal"
-                      data-active={drawMode() === 'horizontal'}
-                      title="点击图表放置水平线"
-                      onClick={() => chooseDrawMode('horizontal')}
-                    >
-                      水平
-                    </button>
-                    <button
-                      class="chip chart-draw-vertical"
-                      data-active={drawMode() === 'vertical'}
-                      title="点击图表放置垂直线"
-                      onClick={() => chooseDrawMode('vertical')}
-                    >
-                      垂线
-                    </button>
-                    <button
-                      class="chip chart-draw-text"
-                      data-active={drawMode() === 'text'}
-                      title="输入文字后点击图表放置标注"
-                      onClick={() => chooseDrawMode('text')}
-                    >
-                      文字
-                    </button>
-                    <button
-                      class="chip chart-draw-trend"
-                      data-active={drawMode() === 'trend'}
-                      title="点两下画趋势线"
-                      onClick={() => chooseDrawMode('trend')}
-                    >
-                      趋势
-                    </button>
-                    <button
-                      class="chip chart-draw-measure"
-                      data-active={drawMode() === 'measure'}
-                      title="点两下测量涨跌幅与跨过的 K 线根数"
-                      onClick={() => chooseDrawMode('measure')}
-                    >
-                      测量
-                    </button>
-                    <button
-                      class="chip chart-draw-arrow"
-                      data-active={drawMode() === 'arrow'}
-                      title="点两下画箭头"
-                      onClick={() => chooseDrawMode('arrow')}
-                    >
-                      箭头
-                    </button>
-                    <button
-                      class="chip chart-draw-channel"
-                      data-active={drawMode() === 'channel'}
-                      title="点三下画平行通道：基线两点 + 偏移一点"
-                      onClick={() => chooseDrawMode('channel')}
-                    >
-                      通道
-                    </button>
-                    <button
-                      class="chip chart-draw-fib"
-                      data-active={drawMode() === 'fib'}
-                      title="点两下画斐波那契回撤"
-                      onClick={() => chooseDrawMode('fib')}
-                    >
-                      斐波
-                    </button>
-                    <button
-                      class="chip chart-draw-fib-ext"
-                      data-active={drawMode() === 'fibExt'}
-                      title="点两下画斐波那契扩展（含 127.2%/161.8%）"
-                      onClick={() => chooseDrawMode('fibExt')}
-                    >
-                      扩展
-                    </button>
-                    <button
-                      class="chip chart-draw-smart"
-                      disabled={smartLoading()}
-                      title="由 Python 识别主要摆动，自动画斐波那契、趋势线、通道和支撑/压力"
-                      onClick={() => void runSmartDrawings()}
-                    >
-                      {smartLoading() ? '分析中…' : '智能'}
-                    </button>
-                  </div>
-                  <Show when={smartError()}>
-                    {(message) => <div class="chart-draw-menu__error">{message()}</div>}
-                  </Show>
-                  <div class="chart-draw-menu__foot">
-                    <button
-                      class="chip chart-draw-undo"
-                      title="撤销画线操作（Ctrl+Z）"
-                      onClick={() => setUndoDrawingsKey((value) => value + 1)}
-                    >
-                      撤销
-                    </button>
-                    <button
-                      class="chip chart-draw-redo"
-                      title="重做画线操作（Ctrl+Y / Ctrl+Shift+Z）"
-                      onClick={() => setRedoDrawingsKey((value) => value + 1)}
-                    >
-                      重做
-                    </button>
-                    <button
-                      class="chip chart-draw-clear"
-                      title="清除所有画线"
-                      onClick={() => setClearDrawingsKey((value) => value + 1)}
-                    >
-                      清线
-                    </button>
-                    <span>拖线体平移 · Ctrl+C/V 复制 · Delete 删除</span>
-                  </div>
-                  <Show when={drawMode() === 'text'}>
-                    <input
-                      class="chart-draw-text-input"
-                      value={drawingText()}
-                      maxlength="20"
-                      placeholder="标注文字"
-                      aria-label="标注文字"
-                      onInput={(event) => setDrawingText(event.currentTarget.value)}
-                    />
-                  </Show>
-                </div>
-              </Show>
-            </div>
-          </Show>
-
-          <Show when={!isTrend()}>
-            <button
-              class="chip chart-range-toggle"
-              title="清除区间统计选区"
-              onClick={() => {
-                setRangeStats(null)
-                setRangeAnchor(null)
-                setClearRangeKey((value) => value + 1)
-              }}
-            >
-              清除区间
-            </button>
-          </Show>
-
-          <Show when={lastPushAt() > 0}>
-            <span
-              class="chart-live-badge"
-              title={`主进程最近一次推送：${timeOfDay(lastPushAt())}；当前刷新间隔 ${Math.round(
-                refreshMs() / 1000
-              )} 秒`}
-            >
-              更新 {timeOfDay(lastPushAt())}
-            </span>
-          </Show>
-
+        {/*
+         * 工具 + 读数 + 操作共用一行：工具常驻排在 指标/公式/复盘 左侧，不折叠也不弹层。
+         * 推送时间不再做成徽标常驻（用户 2026-11-14 觉得位置难看、且和行情头的
+         * 「行情/接收」时间重复），改为挂在 ↻ 按钮的 title 里，需要时悬停就能看到。
+         */}
+        <div class="chart-headline">
           <Show when={!isTrend() && klineSeries()?.source === 'cache'}>
             <span class="chart-cache-badge" title={klineSeries()?.cachePath ?? '本地缓存'}>
               离线缓存
@@ -941,15 +678,253 @@ export function ChartPanel(props: ChartPanelProps): JSX.Element {
               离线缓存
             </span>
           </Show>
-        </div>
 
-        {/* 十字光标联动读数：有悬浮时显示读数，否则显示图例 */}
-        <div class="chart-headline">
-          <Show when={hover() === null && lastPushAt() > 0}>
-            <span class="chart-live-badge chart-headline__meta">
-              更新 {timeOfDay(lastPushAt())}
-            </span>
-          </Show>
+          <div class="chart-tools">
+            {/* 指数没有复权概念，隐藏复权档位；否则点「前复权」看起来像生效了，其实没意义 */}
+            <Show when={!isTrend() && !isIndexCode(props.code)}>
+              <div class="chart-adjust-group">
+                <For
+                  each={[
+                    { value: 'none' as KLineAdjust, label: '不复权' },
+                    { value: 'qfq' as KLineAdjust, label: '前复权' },
+                    { value: 'hfq' as KLineAdjust, label: '后复权' }
+                  ]}
+                >
+                  {(item) => (
+                    <button
+                      class={`chip chart-adjust chart-adjust--${item.value}`}
+                      data-active={adjust() === item.value}
+                      onClick={() => {
+                        setAdjust(item.value)
+                        updateSettings({ klineAdjust: item.value })
+                        setHover(null)
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+
+            <Show when={!isTrend()}>
+              <button
+                class="chip chart-ma"
+                data-active={showAverages()}
+                title="均线显示（默认开启）"
+                onClick={() => {
+                  const next = !showAverages()
+                  setShowAverages(next)
+                  updateSettings({ showAverages: next })
+                }}
+              >
+                均线
+              </button>
+              <button
+                class="chip chart-boll"
+                data-active={showBoll()}
+                title="布林线叠加（默认关闭）"
+                onClick={() => {
+                  const next = !showBoll()
+                  setShowBoll(next)
+                  updateSettings({ showBoll: next })
+                }}
+              >
+                BOLL
+              </button>
+            </Show>
+
+            <Show when={!isTrend()}>
+              <button
+                class="chip chart-log"
+                data-active={logScale()}
+                onClick={() => {
+                  const next = !logScale()
+                  setLogScale(next)
+                  updateSettings({ logScale: next })
+                }}
+              >
+                {logScale() ? '对数' : '线性'}
+              </button>
+            </Show>
+
+            <Show when={!isTrend()}>
+              <div class="chart-draw">
+                <button
+                  class="chip chart-draw-toggle"
+                  data-active={showDrawings()}
+                  title="画线：默认隐藏，打开后可选择工具"
+                  onClick={() => setDrawMenuOpen((value) => !value)}
+                >
+                  画线
+                </button>
+                <Show when={drawMenuOpen()}>
+                  <div class="chart-draw-menu">
+                    <label class="chart-draw-menu__show">
+                      <input
+                        type="checkbox"
+                        checked={showDrawings()}
+                        onChange={(event) => {
+                          const next = event.currentTarget.checked
+                          setShowDrawings(next)
+                          if (!next) setDrawMode('none')
+                          updateSettings({ showDrawings: next })
+                        }}
+                      />
+                      显示画线
+                      <span class="chart-draw-menu__snap">
+                        <input
+                          type="checkbox"
+                          checked={snapDrawings()}
+                          onChange={(event) => {
+                            const next = event.currentTarget.checked
+                            setSnapDrawings(next)
+                            updateSettings({ snapDrawings: next })
+                          }}
+                        />
+                        吸附
+                      </span>
+                    </label>
+                    <div class="chart-draw-menu__tools">
+                      <button
+                        class="chip chart-draw-horizontal"
+                        data-active={drawMode() === 'horizontal'}
+                        title="点击图表放置水平线"
+                        onClick={() => chooseDrawMode('horizontal')}
+                      >
+                        水平
+                      </button>
+                      <button
+                        class="chip chart-draw-vertical"
+                        data-active={drawMode() === 'vertical'}
+                        title="点击图表放置垂直线"
+                        onClick={() => chooseDrawMode('vertical')}
+                      >
+                        垂线
+                      </button>
+                      <button
+                        class="chip chart-draw-text"
+                        data-active={drawMode() === 'text'}
+                        title="输入文字后点击图表放置标注"
+                        onClick={() => chooseDrawMode('text')}
+                      >
+                        文字
+                      </button>
+                      <button
+                        class="chip chart-draw-trend"
+                        data-active={drawMode() === 'trend'}
+                        title="点两下画趋势线"
+                        onClick={() => chooseDrawMode('trend')}
+                      >
+                        趋势
+                      </button>
+                      <button
+                        class="chip chart-draw-measure"
+                        data-active={drawMode() === 'measure'}
+                        title="点两下测量涨跌幅与跨过的 K 线根数"
+                        onClick={() => chooseDrawMode('measure')}
+                      >
+                        测量
+                      </button>
+                      <button
+                        class="chip chart-draw-arrow"
+                        data-active={drawMode() === 'arrow'}
+                        title="点两下画箭头"
+                        onClick={() => chooseDrawMode('arrow')}
+                      >
+                        箭头
+                      </button>
+                      <button
+                        class="chip chart-draw-channel"
+                        data-active={drawMode() === 'channel'}
+                        title="点三下画平行通道：基线两点 + 偏移一点"
+                        onClick={() => chooseDrawMode('channel')}
+                      >
+                        通道
+                      </button>
+                      <button
+                        class="chip chart-draw-fib"
+                        data-active={drawMode() === 'fib'}
+                        title="点两下画斐波那契回撤"
+                        onClick={() => chooseDrawMode('fib')}
+                      >
+                        斐波
+                      </button>
+                      <button
+                        class="chip chart-draw-fib-ext"
+                        data-active={drawMode() === 'fibExt'}
+                        title="点两下画斐波那契扩展（含 127.2%/161.8%）"
+                        onClick={() => chooseDrawMode('fibExt')}
+                      >
+                        扩展
+                      </button>
+                      <button
+                        class="chip chart-draw-smart"
+                        disabled={smartLoading()}
+                        title="由 Python 识别主要摆动，自动画斐波那契、趋势线、通道和支撑/压力"
+                        onClick={() => void runSmartDrawings()}
+                      >
+                        {smartLoading() ? '分析中…' : '智能'}
+                      </button>
+                    </div>
+                    <Show when={smartError()}>
+                      {(message) => <div class="chart-draw-menu__error">{message()}</div>}
+                    </Show>
+                    <div class="chart-draw-menu__foot">
+                      <button
+                        class="chip chart-draw-undo"
+                        title="撤销画线操作（Ctrl+Z）"
+                        onClick={() => setUndoDrawingsKey((value) => value + 1)}
+                      >
+                        撤销
+                      </button>
+                      <button
+                        class="chip chart-draw-redo"
+                        title="重做画线操作（Ctrl+Y / Ctrl+Shift+Z）"
+                        onClick={() => setRedoDrawingsKey((value) => value + 1)}
+                      >
+                        重做
+                      </button>
+                      <button
+                        class="chip chart-draw-clear"
+                        title="清除所有画线"
+                        onClick={() => setClearDrawingsKey((value) => value + 1)}
+                      >
+                        清线
+                      </button>
+                      <span>拖线体平移 · Ctrl+C/V 复制 · Delete 删除</span>
+                    </div>
+                    <Show when={drawMode() === 'text'}>
+                      <input
+                        class="chart-draw-text-input"
+                        value={drawingText()}
+                        maxlength="20"
+                        placeholder="标注文字"
+                        aria-label="标注文字"
+                        onInput={(event) => setDrawingText(event.currentTarget.value)}
+                      />
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+            </Show>
+
+            <Show when={!isTrend()}>
+              <button
+                class="chip chart-range-toggle"
+                title="清除区间统计选区"
+                onClick={() => {
+                  setRangeStats(null)
+                  setRangeAnchor(null)
+                  setClearRangeKey((value) => value + 1)
+                }}
+              >
+                清除区间
+              </button>
+            </Show>
+          </div>
+
+          {/* 十字光标联动读数：有悬浮时显示读数，否则显示图例 */}
           <Show when={hover()}>
             {(current) => (
               <div class="chart-readout">
@@ -976,58 +951,67 @@ export function ChartPanel(props: ChartPanelProps): JSX.Element {
             )}
           </Show>
 
-          <button
-            class="btn btn--bare indicator-open"
-            title="技术指标"
-            onClick={() => openPopup('indicators')}
-          >
-            指标
-          </button>
-          <button
-            class="btn btn--bare formula-open"
-            title="指标公式预览"
-            onClick={() => openPopup('formula')}
-          >
-            公式
-          </button>
-          <Show when={appState.settings.mainFormula}>
+          {/* 操作组靠右：左边留给工具，整行从左往右读 */}
+          <div class="chart-headline__actions">
             <button
-              class="btn btn--bare chart-formula-clear"
-              title={`清除主图公式：${appState.settings.mainFormula}`}
-              onClick={() => updateSettings({ mainFormula: undefined })}
+              class="btn btn--bare indicator-open"
+              title="技术指标"
+              onClick={() => openPopup('indicators')}
             >
-              清公式
+              指标
             </button>
-          </Show>
-          <button
-            class="btn btn--bare replay-open"
-            title="日 K 复盘"
-            onClick={() => openView('replay')}
-          >
-            复盘
-          </button>
-          <button
-            class="btn btn--bare chart-pin"
-            title="当前窗口置顶（再次点击取消）"
-            data-active={pinned()}
-            onClick={() => void shell.window.toggleAlwaysOnTop().then(setPinned)}
-          >
-            {pinned() ? '取消置顶' : '置顶'}
-          </button>
-          <button
-            class="btn btn--bare chart-export"
-            title="导出当前图表 CSV"
-            onClick={exportSeries}
-          >
-            导出
-          </button>
-          <button
-            class="btn btn--icon btn--bare"
-            title="刷新图表数据"
-            onClick={() => void refetch()}
-          >
-            <IconRefresh size={13} />
-          </button>
+            <button
+              class="btn btn--bare formula-open"
+              title="指标公式预览"
+              onClick={() => openPopup('formula')}
+            >
+              公式
+            </button>
+            <Show when={appState.settings.mainFormula}>
+              <button
+                class="btn btn--bare chart-formula-clear"
+                title={`清除主图公式：${appState.settings.mainFormula}`}
+                onClick={() => updateSettings({ mainFormula: undefined })}
+              >
+                清公式
+              </button>
+            </Show>
+            <button
+              class="btn btn--bare replay-open"
+              title="日 K 复盘"
+              onClick={() => openView('replay')}
+            >
+              复盘
+            </button>
+            <button
+              class="btn btn--bare chart-pin"
+              title="当前窗口置顶（再次点击取消）"
+              data-active={pinned()}
+              onClick={() => void shell.window.toggleAlwaysOnTop().then(setPinned)}
+            >
+              {pinned() ? '取消置顶' : '置顶'}
+            </button>
+            <button
+              class="btn btn--bare chart-export"
+              title="导出当前图表 CSV"
+              onClick={exportSeries}
+            >
+              导出
+            </button>
+            <button
+              class="btn btn--icon btn--bare"
+              title={
+                lastPushAt() > 0
+                  ? `刷新图表数据（最近推送 ${timeOfDay(lastPushAt())}，间隔 ${Math.round(
+                      refreshMs() / 1000
+                    )} 秒）`
+                  : '刷新图表数据'
+              }
+              onClick={() => void refetch()}
+            >
+              <IconRefresh size={13} />
+            </button>
+          </div>
         </div>
       </div>
 

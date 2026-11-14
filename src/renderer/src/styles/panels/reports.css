@@ -965,16 +965,6 @@
   font-size: var(--fs-2xs);
 }
 
-/* 主进程最近一次推送时间：让「图没动」和「行情没动」能一眼区分 */
-.chart-live-badge {
-  padding: 1px 6px;
-  border: 1px solid color-mix(in srgb, var(--down) 45%, transparent);
-  border-radius: var(--r-full);
-  color: var(--down);
-  font-size: var(--fs-2xs);
-  font-variant-numeric: tabular-nums;
-}
-
 .data__inventory {
   display: flex;
   flex-direction: column;

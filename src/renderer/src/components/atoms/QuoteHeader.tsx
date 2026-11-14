@@ -14,7 +14,7 @@ import {
 } from '@shared/format'
 import { marketSession } from '@shared/market'
 import { createValueFlash } from '../../lib/dom'
-import { toneOf, type Tone } from '../../lib/tone'
+import { toneOf, toneVsPrevClose, type Tone } from '../../lib/tone'
 import { addWatchItem, defaultGroup, removeWatchItem } from '../../stores/app'
 import { clockNow } from '../../stores/clock'
 import { openPopup } from '../../stores/workspace'
@@ -216,18 +216,32 @@ export function QuoteHeader(props: QuoteHeaderProps): JSX.Element {
       </div>
 
       <div class="quote-metrics">
+        {/* 价格类指标一律以昨收为基准染色；涨停红、跌停绿是交易所语义 */}
         <Metric
           label="今开"
           value={fixed(props.quote.open)}
-          tone={toneOf(props.quote.open - props.quote.prevClose)}
+          tone={toneVsPrevClose(props.quote.open, props.quote.prevClose)}
         />
-        <Metric label="最高" value={fixed(props.quote.high)} tone="up" />
-        <Metric label="最低" value={fixed(props.quote.low)} tone="down" />
+        <Metric
+          label="最高"
+          value={fixed(props.quote.high)}
+          tone={toneVsPrevClose(props.quote.high, props.quote.prevClose)}
+        />
+        <Metric
+          label="最低"
+          value={fixed(props.quote.low)}
+          tone={toneVsPrevClose(props.quote.low, props.quote.prevClose)}
+        />
         <Metric label="昨收" value={fixed(props.quote.prevClose)} />
+        {/* 换手 / 量比 / 振幅 / 成交量 / 成交额没有涨跌方向，染红绿会误导，保持中性 */}
         <Metric label="换手" value={percent(props.quote.turnoverRate)} />
         <Metric label="量比" value={fixed(volumeRatio())} />
         <Metric label="振幅" value={percent(props.quote.amplitude)} />
-        <Metric label="均价" value={fixed(props.quote.avgPrice)} />
+        <Metric
+          label="均价"
+          value={fixed(props.quote.avgPrice)}
+          tone={toneVsPrevClose(props.quote.avgPrice, props.quote.prevClose)}
+        />
         <Metric label="涨停" value={fixed(limits().up)} tone="up" />
         <Metric label="跌停" value={fixed(limits().down)} tone="down" />
         <Metric label="成交量" value={compactVolume(props.quote.volume)} />
