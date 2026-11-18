@@ -75,11 +75,12 @@ import {
   refreshQuotes
 } from './stores/quotes'
 import { api, shell } from './lib/client'
+import { sidebarDensity, type SidebarDensity } from './lib/sidebar-width'
 import { createSparklineLoader } from './stores/sparklines'
 import { dismissLatestAlert, hydrateAlertEvents, latestAlert } from './stores/alerts'
 import { startScreenTracking } from './stores/screenTracking'
 import { startClock } from './stores/clock'
-import { trackSector } from './stores/sector'
+import { sector, sidebarView, trackSector } from './stores/sector'
 import {
   activeView,
   closePopup,
@@ -252,11 +253,22 @@ export default function App(): JSX.Element {
     document.documentElement.dataset.theme = appState.settings.theme
   })
 
-  // 行情推送：自选股 + 当前选中股（排行榜点进来的股票不在自选里，也要能刷新）
+  /*
+   * 行情推送的代码集合 —— 左栏三张列表统一走这一条订阅：
+   *   自选股 / 自定义 → watchCodes()（所有分组的代码）
+   *   板块成分股     → 当前板块的代码（不在自选里）
+   *   当前选中股     → 排行榜点进来的股票也要能刷新
+   *
+   * 板块成分股以前由 Sidebar 自己按 120 只一批、每秒拉一次快照，和这条订阅
+   * 是两套节奏：板块列表一旦那批请求失败或落在半路上，就只有名字没有价格，
+   * 而自选/自定义照常刷新（2026-11-18 用户反馈「就板块不行」）。
+   * 现在并进同一条订阅：Python 侧按代码集合合并轮询，板块列表拿到的就是同一份行情。
+   */
   const quoteCodes = (): string[] => {
     if (!appReady() || !liveStarted()) return []
     const active = activeQuoteCode()
-    return active ? [...new Set([...watchCodes(), active])] : watchCodes()
+    const board = sidebarView() === 'sector' ? (sector()?.codes ?? []) : []
+    return [...new Set([...watchCodes(), ...board, ...(active ? [active] : [])])]
   }
 
   createQuoteStream(quoteCodes, () => appState.settings.refreshInterval)
@@ -283,7 +295,7 @@ export default function App(): JSX.Element {
     })
   })
 
-  // 自选股行内迷你走势图：并发受限地补齐并定期刷新
+  // 自选股列表的行内迷你走势图：并发受限地补齐并定期刷新
   createSparklineLoader(() => (appReady() ? watchCodes() : []))
 
   const activeQuote = (): Quote | undefined => quoteOf(activeQuoteCode())
@@ -293,6 +305,12 @@ export default function App(): JSX.Element {
       sidebar: appState.settings.sidebarWidth ?? 280,
       rail: appState.settings.railWidth ?? 330
     }
+
+  /**
+   * 左栏宽度分档（宽 / 紧凑 / 最窄）：行内布局按它切换迷你图与列宽，
+   * 三张列表共用同一个值，切换页签时列不会漂移（判定见 lib/sidebar-width.ts）。
+   */
+  const sidebarLayout = (): SidebarDensity => sidebarDensity(currentWidths().sidebar)
 
   const beginResize = (side: 'sidebar' | 'rail', event: PointerEvent): void => {
     event.preventDefault()
@@ -347,6 +365,7 @@ export default function App(): JSX.Element {
         'app--sidebar-hidden': appState.settings.sidebarHidden === true,
         'app--view': activeView() !== 'chart'
       }}
+      data-sidebar={sidebarLayout()}
       style={appStyle()}
     >
       <TitleBar />

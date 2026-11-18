@@ -75,4 +75,32 @@ describe('自选与自定义板块多对多', () => {
     addWatchItem({ code: 'sh601318', name: '中国平安', market: 'SH' })
     expect(groupByName('自选')?.items.filter((item) => item.code === 'sh601318')).toHaveLength(1)
   })
+
+  /*
+   * 左栏「自定义」列表的移出按钮走的就是 removeWatchItem(code, groupId)。
+   * 曾经这个按钮没渲染出来（用户反馈「自定义板块的个股无法删除/移出」），
+   * 这里把数据层的行为钉住：只删指定分组，别处同一只票必须留着。
+   */
+  it('从自定义板块移出一只：只动这个板块，自选和别的板块都还在', () => {
+    const battery = groupByName('电池')!
+    addWatchItem({ code: 'sz002594', name: '比亚迪', market: 'SZ' })
+    addStockToGroup({ code: 'sz002594', name: '比亚迪', market: 'SZ' }, battery.id)
+
+    removeWatchItem('sz002594', battery.id)
+
+    expect(groupByName('电池')?.items.map((item) => item.code)).not.toContain('sz002594')
+    expect(groupByName('自选')?.items.map((item) => item.code)).toContain('sz002594')
+  })
+
+  it('不传 groupId 会退回自选分组——所以列表里移出时必须显式带板块 id', () => {
+    const battery = groupByName('电池')!
+    addWatchItem({ code: 'sh600276', name: '恒瑞医药', market: 'SH' })
+    addStockToGroup({ code: 'sh600276', name: '恒瑞医药', market: 'SH' }, battery.id)
+
+    // 这就是界面必须挡住的那条路：拿不到自定义板块 id 时不能退化成默认参数
+    removeWatchItem('sh600276')
+
+    expect(groupByName('自选')?.items.map((item) => item.code)).not.toContain('sh600276')
+    expect(groupByName('电池')?.items.map((item) => item.code)).toContain('sh600276')
+  })
 })

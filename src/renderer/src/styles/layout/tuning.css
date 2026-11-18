@@ -180,12 +180,6 @@
 
 /* ------------------------------------------------------------ 窄窗适配 */
 @media (max-width: 1240px) {
-  /* 窄窗仍保留迷你图：只压缩价格列间距，不隐藏走势。 */
-  .watch-row__nums,
-  .sector-row__nums {
-    min-width: 62px;
-  }
-
   .sidebar__head .btn--icon {
     width: 23px;
     height: 23px;
@@ -803,21 +797,6 @@ select optgroup {
     display: none;
   }
 
-  .watch-row__spark-slot {
-    display: none;
-  }
-
-  .watch-row__chg {
-    display: none;
-  }
-
-  /* 迷你图列已隐藏，网格模板也要去掉 46px，否则名称仍被挤成 3 个字。 */
-  .watch-row {
-    grid-template-columns: minmax(0, 1fr) minmax(56px, auto) 18px;
-    gap: 6px;
-    padding-left: 8px;
-    padding-right: 8px;
-  }
 }
 
 /* ====================================================== 1.8 信息密度精修 */
@@ -1015,34 +994,27 @@ select optgroup {
   height: 22px;
 }
 
-.watch-row {
-  gap: 6px;
-  padding: 2px 8px;
-}
-
-.watch-row__name {
+/* 左栏股票行（自选 / 板块 / 自定义）：名称 12px、代码 9px、价格 12px，
+   迷你图 40×18，行内留白 2px 8px —— 三张列表同一档密度。 */
+.stock-row__name {
   font-size: 12px;
 }
 
-.watch-row__price {
+.stock-row__price {
   font-size: 12px;
 }
 
-.watch-row__code {
+.stock-row__code {
   font-size: 9px;
 }
 
-.watch-row__spark-slot,
-.watch-row .sparkline {
-  width: 40px !important;
-  min-width: 40px;
-  max-width: 40px;
-  height: 17px;
-}
-
-.watch-row__spark-slot {
-  width: 40px;
-  min-width: 40px;
+/* 迷你走势：与合并前的板块行同宽（46px），信息量才够看一眼趋势 */
+.stock-row__spark,
+.stock-row .sparkline {
+  width: 46px !important;
+  min-width: 46px;
+  max-width: 46px;
+  height: 20px;
 }
 
 .sidebar__foot {
@@ -1177,4 +1149,26 @@ select optgroup {
 .unusual__tools {
   padding-top: 4px;
   padding-bottom: 4px;
+}
+
+/* ================================================= 左栏行：两档密度 */
+/*
+ * 三张列表（自选 / 板块 / 自定义）共用同一个行组件与同一套列宽，这里只按
+ * **左栏自身宽度**切换迷你图：宽档 46px、窄档 26px —— 任何允许的左栏宽度都保留迷你图。
+ * 档位在 `lib/sidebar-width.ts` 里算好，App 写成 `data-sidebar`。
+ *
+ * 为什么不用视口媒体查询：左栏宽度是用户拖出来的，和窗口宽度无关 ——
+ * 1440 宽的窗口里左栏也可能只有 224px。为什么不用容器查询：本项目自定义滚动条下
+ * Chromium 量给容器查询的宽度不等于行宽（实测内容盒 224px 时报 239px）。
+ */
+.app[data-sidebar='compact'] .stock-row {
+  grid-template-columns: minmax(0, 1fr) 26px minmax(66px, auto);
+}
+
+.app[data-sidebar='compact'] .stock-row__spark,
+.app[data-sidebar='compact'] .stock-row .sparkline {
+  width: 26px !important;
+  min-width: 26px;
+  max-width: 26px;
+  height: 18px;
 }

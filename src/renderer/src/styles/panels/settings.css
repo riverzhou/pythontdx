@@ -723,36 +723,6 @@
   color: var(--text-2);
 }
 
-.market__sorts {
-  display: flex;
-  gap: 1px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
-}
-
-.market__sort {
-  height: 22px;
-  padding: 0 7px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--text-3);
-  background: transparent;
-  font-size: var(--fs-2xs);
-  cursor: pointer;
-}
-
-.market__sort:hover {
-  color: var(--text-1);
-  background: var(--panel-hover);
-}
-
-.market__sort[data-active='true'] {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
 /* 资金流页签的 MAC 补充卡 */
 .flow__mac {
   margin-top: 8px;
@@ -1160,4 +1130,3 @@
   flex-wrap: wrap;
   row-gap: 4px;
 }
-

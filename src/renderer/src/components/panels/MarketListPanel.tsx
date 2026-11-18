@@ -3,6 +3,13 @@
  *
  * 代码与名称来自代码表；当前页报价通过 0x054c 批量快照补齐。
  * 不按 0x054b 的“分类”猜测市场——分类编号在不同主站上并不稳定。
+ *
+ * 排序：点表头。代码/名称用代码表字段直接排；数值列要先有**全表**报价，
+ * 否则「涨幅降序」只排已加载的那 200 行，看着像对、其实是错的。
+ * 所以第一次点数值表头时用 MAC 批量拉全表快照（按 400 只分批，进度可见），
+ * 之后换列/换方向只在内存里重排，不再请求。
+ * 顺序来自这份快照，**表里显示的价格仍按当前页现取**：两者可能差一点点，
+ * 但滚动换页始终有新价，不会因为排序把整张表冻在十几秒前。
  */
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
 import type { Quote } from '@shared/types'
@@ -12,9 +19,15 @@ import { api, errorMessage } from '../../lib/client'
 import { openStockMenu } from '../../stores/stockMenu'
 import { downloadText } from '../../lib/download'
 import { toCsv } from '@shared/csv'
-import { createSparklineLoader, requestVisibleSparklines, sparklineOf } from '../../stores/sparklines'
+import {
+  createSparklineLoader,
+  requestVisibleSparklines,
+  sparklineOf
+} from '../../stores/sparklines'
+import { quoteSortValue, sortRows, type QuoteSortKey, type SortState } from '../../lib/table-sort'
 import { IconClose } from '../atoms/Icons'
 import { Sparkline } from '../charts/Sparkline'
+import { SortHeader } from '../atoms/SortHeader'
 import { EXTRA_COLUMNS, ExtraColumnCells, ExtraColumnHeaders } from '../atoms/StockExtraColumns'
 
 type TabKey = 'all' | 'index' | 'fund' | 'reit' | 'bond' | 'kcb' | 'cyb' | 'bj' | 'b'
@@ -33,19 +46,16 @@ const TABS: Array<{ key: TabKey; label: string }> = [
 
 const PAGE_SIZE = 200
 
-type SortMode =
-  'default' | 'change' | 'changeAsc' | 'amount' | 'price' | 'turnover' | 'volume' | 'speed'
-
-function metric(map: Map<string, Quote>, mode: SortMode, item: SearchSecurity): number {
-  const quote = map.get(item.code)
-  if (!quote) return Number.NEGATIVE_INFINITY
-  if (mode === 'change') return quote.changePct
-  if (mode === 'changeAsc') return -quote.changePct
-  if (mode === 'turnover') return quote.turnoverRate ?? 0
-  if (mode === 'volume') return quote.volumeRatio ?? 0
-  if (mode === 'speed') return quote.riseSpeed ?? 0
-  if (mode === 'amount') return quote.amount ?? 0
-  return quote.price
+/** 页脚「当前按 XX 降序」用的中文列名 */
+const SORT_LABEL: Record<string, string> = {
+  code: '代码',
+  name: '名称',
+  price: '现价',
+  change: '涨跌幅',
+  amount: '成交额',
+  turnover: '换手',
+  volume: '量比',
+  speed: '涨速'
 }
 
 function isAShare(item: SearchSecurity): boolean {
@@ -88,14 +98,15 @@ export function MarketListPanel(props: {
   const [quotes, setQuotes] = createSignal<Quote[]>([])
   const [loading, setLoading] = createSignal(true)
   const [error, setError] = createSignal<string | null>(null)
-  const [sort, setSort] = createSignal<SortMode>('default')
-  const [rankedCodes, setRankedCodes] = createSignal<string[]>([])
-  const [allKey, setAllKey] = createSignal('')
-  const [allLoading, setAllLoading] = createSignal(false)
-  const [allProgress, setAllProgress] = createSignal('')
+  const [sort, setSort] = createSignal<SortState | null>(null)
+  /** 全表报价快照：只有点数值表头时才会拉，拉到后换列不再请求 */
+  const [snapshot, setSnapshot] = createSignal<Map<string, Quote>>(new Map())
+  const [snapshotKey, setSnapshotKey] = createSignal('')
+  const [snapshotLoading, setSnapshotLoading] = createSignal(false)
+  const [snapshotProgress, setSnapshotProgress] = createSignal('')
   const [pinyinReady, setPinyinReady] = createSignal(false)
   let requestId = 0
-  let allRequestId = 0
+  let snapshotRequestId = 0
   /** 拼音索引按需构建（pinyin-pro 词典较大，动态 import 让首屏不背这份体积） */
   let searchIndex: SearchEntry[] | undefined
   let pinyinMatcher: ((entry: SearchEntry, keyword: string) => boolean) | undefined
@@ -152,76 +163,109 @@ export function MarketListPanel(props: {
       })
   })
 
-  const sortKey = createMemo(() => `${tab()}|${query()}`)
+  /** 排序 + 搜索共同决定「当前这一份列表」，快照按它缓存 */
+  const viewKey = createMemo(() => `${tab()}|${query()}`)
+
+  /**
+   * 快照是否覆盖当前列表。
+   * 只有 key 对得上才算——换了 tab 或改了搜索词，旧快照里的代码就不是这一份了。
+   *
+   * 必须声明在 `loadKey` 之前：`createMemo` 建好就会算一次初值，
+   * 后面的 memo 读到这里会直接拿到值；写在后面就是 TDZ（渲染层白屏 + 控制台
+   * 「Cannot access 'X' before initialization」）。
+   */
+  const snapshotReady = createMemo(() => snapshot().size > 0 && snapshotKey() === viewKey())
+
+  /**
+   * 当前页报价对应的是「哪一份排序后的前 N 行」。
+   * 改排序会让同样的 200 个位置换成另一批股票，所以排序状态也算进 key；
+   * 快照到位时也要重算一次 —— 那时才第一次知道该取哪 200 行。
+   */
+  const loadKey = createMemo(() => {
+    const state = sort()
+    return `${viewKey()}|${state?.key ?? ''}|${state?.dir ?? ''}|${snapshotReady() ? 'S' : '-'}`
+  })
+
+  /** 数值列排序 + 整表快照还在路上：此刻既不知道该取哪 200 行，也不该重排 */
+  const waitingSnapshot = (): boolean => {
+    const key = sort()?.key
+    if (key === undefined || key === 'code' || key === 'name') return false
+    return snapshotLoading()
+  }
 
   const displayed = createMemo(() => {
+    const state = sort()
     const base = filtered()
-    const mode = sort()
-    const order = rankedCodes()
-    if (mode === 'default' || order.length === 0) return base
-    const rank = new Map(order.map((code, index) => [code, index]))
-    return [...base].sort(
-      (a, b) =>
-        (rank.get(a.code) ?? Number.MAX_SAFE_INTEGER) -
-        (rank.get(b.code) ?? Number.MAX_SAFE_INTEGER)
-    )
+    if (!state) return base
+    // 快照还没到时先按原顺序显示：数值全缺，sortRows 会原样返回
+    const map = snapshotReady() ? snapshot() : null
+    return sortRows(base, state, (item) => {
+      if (state.key === 'code') return item.code
+      if (state.key === 'name') return item.name
+      return quoteSortValue(map?.get(item.code), state.key as QuoteSortKey)
+    })
   })
 
   // 垂直滚动加载：初始 200 行，滚到底再加 200；不再用上/下翻页
   const visibleItems = createMemo(() => displayed().slice(0, limit()))
 
-  const loadAll = async (mode: SortMode): Promise<void> => {
-    if (mode === 'default') {
-      setSort('default')
-      setLimit(PAGE_SIZE)
-      return
-    }
-    const key = sortKey()
-    setSort(mode)
-    setLimit(PAGE_SIZE)
-    if (allKey() === key && rankedCodes().length > 0) return
-    const current = ++allRequestId
-    setAllLoading(true)
+  /**
+   * 拉全表快照。一次要几千只，只能分批；连续点表头时用 300ms 合并成一次，
+   * 免得「涨幅 → 成交额 → 涨跌幅」连点打出三轮全表请求。
+   */
+  const loadSnapshot = async (): Promise<void> => {
+    const key = viewKey()
+    if (snapshotKey() === key && snapshot().size > 0) return
+    const current = ++snapshotRequestId
+    setSnapshotLoading(true)
     setError(null)
     try {
       const codes = filtered().map((item) => item.code)
+      const map = new Map<string, Quote>()
       await new Promise((resolve) => setTimeout(resolve, 300))
-      const quotes = new Map<string, Quote>()
+      if (current !== snapshotRequestId) return
       // 一次 5,600 只会让 Electron IPC 响应过大；按 400 只分批，进度可见。
       for (let start = 0; start < codes.length; start += 400) {
-        if (current !== allRequestId) return
-        setAllProgress(`${Math.min(start + 400, codes.length)} / ${codes.length}`)
+        setSnapshotProgress(`${Math.min(start + 400, codes.length)} / ${codes.length}`)
         const data = await api.quote.macQuotes(codes.slice(start, start + 400))
-        for (const quote of data) quotes.set(quote.code, quote)
+        for (const quote of data) map.set(quote.code, quote)
+        if (current !== snapshotRequestId) return
       }
-      if (current !== allRequestId) return
-      const ranked = [...codes].sort(
-        (a, b) =>
-          metric(quotes, mode, { code: b } as SearchSecurity) -
-          metric(quotes, mode, { code: a } as SearchSecurity)
-      )
-      setRankedCodes(ranked)
-      setAllKey(key)
-      setAllProgress('')
+      setSnapshotKey(key)
+      setSnapshot(map)
+      setSnapshotProgress('')
     } catch (cause) {
-      if (current === allRequestId) setError(errorMessage(cause))
+      if (current === snapshotRequestId) setError(errorMessage(cause))
     } finally {
-      if (current === allRequestId) setAllLoading(false)
+      if (current === snapshotRequestId) setSnapshotLoading(false)
     }
   }
 
+  const applySort = (next: SortState): void => {
+    setSort(next)
+    setLimit(PAGE_SIZE)
+    // 代码/名称是代码表自带字段，不需要报价快照
+    if (next.key !== 'code' && next.key !== 'name') void loadSnapshot()
+  }
+
   createEffect(() => {
-    const key = `${tab()}|${query()}|${sort()}`
-    if (key !== quoteKey) {
-      quoteKey = key
+    if (loadKey() !== quoteKey) {
+      quoteKey = loadKey()
       loadedCount = 0
       requestId += 1
-      setQuotes([])
+      /*
+       * 整表快照还在路上时先留着上一批报价：这时显示顺序还没变，
+       * 清空只会把整张表刷成一片「—」等十几秒。快照到位后 loadKey 会再变一次，
+       * 那时才清空并取排序后的前 200 行。
+       */
+      if (!waitingSnapshot()) setQuotes([])
       if (limit() !== PAGE_SIZE) {
         setLimit(PAGE_SIZE)
         return
       }
     }
+    // 快照回来之前不知道该取哪 200 行，先别按旧顺序白拉一轮
+    if (waitingSnapshot()) return
 
     const items = displayed()
     const target = Math.min(limit(), items.length)
@@ -248,7 +292,12 @@ export function MarketListPanel(props: {
     })()
   })
 
-  const quoteMap = createMemo(() => new Map(quotes().map((quote) => [quote.code, quote])))
+  const quoteMap = createMemo(() => {
+    const map = new Map<string, Quote>()
+    if (snapshotReady()) for (const [code, quote] of snapshot()) map.set(code, quote)
+    for (const quote of quotes()) map.set(quote.code, quote)
+    return map
+  })
   // 当前页 100 只，排队加载分时（限并发），翻页自动换一批
   createSparklineLoader(() => visibleItems().map((item) => item.code))
 
@@ -290,40 +339,13 @@ export function MarketListPanel(props: {
                 onClick={() => {
                   setTab(item.key)
                   setLimit(PAGE_SIZE)
-                  setSort('default')
-                  setAllKey('')
+                  setSort(null)
                 }}
               >
                 {item.label}
               </button>
             )}
           </For>
-          <div class="market__sorts">
-            <For
-              each={
-                [
-                  ['default', '默认'],
-                  ['change', '涨幅'],
-                  ['changeAsc', '跌幅'],
-                  ['amount', '成交额'],
-                  ['price', '现价'],
-                  ['turnover', '换手'],
-                  ['volume', '量比'],
-                  ['speed', '涨速']
-                ] as Array<[SortMode, string]>
-              }
-            >
-              {([value, label]) => (
-                <button
-                  class={`market__sort market__sort--${value}`}
-                  data-active={sort() === value}
-                  onClick={() => void loadAll(value)}
-                >
-                  {label}
-                </button>
-              )}
-            </For>
-          </div>
           <input
             class="market__search"
             type="search"
@@ -332,8 +354,7 @@ export function MarketListPanel(props: {
             onInput={(event) => {
               setQuery(event.currentTarget.value)
               setLimit(PAGE_SIZE)
-              setSort('default')
-              setAllKey('')
+              setSort(null)
             }}
           />
         </div>
@@ -361,23 +382,69 @@ export function MarketListPanel(props: {
               <col style="width: 52px" />
               <col style="width: 60px" />
               <For each={EXTRA_COLUMNS}>
-                {(column) => (
-                  <col data-col={column.key} style={{ width: `${column.width}px` }} />
-                )}
+                {(column) => <col data-col={column.key} style={{ width: `${column.width}px` }} />}
               </For>
               {/* 走势列：不设尾列，表格多出的宽度按比例摊到各列，右侧不再留空 */}
               <col style="width: 58px" />
             </colgroup>
             <thead>
               <tr>
-                <th>代码</th>
-                <th>名称</th>
-                <th class="num">现价</th>
-                <th class="num">涨跌幅</th>
-                <th class="num">成交额</th>
-                <th class="num">换手</th>
-                <th class="num">量比</th>
-                <th class="num">涨速</th>
+                <SortHeader
+                  label="代码"
+                  sortKey="code"
+                  firstDir="asc"
+                  sort={sort()}
+                  onSort={applySort}
+                />
+                <SortHeader
+                  label="名称"
+                  sortKey="name"
+                  firstDir="asc"
+                  sort={sort()}
+                  onSort={applySort}
+                />
+                <SortHeader
+                  label="现价"
+                  sortKey="price"
+                  class="num"
+                  sort={sort()}
+                  onSort={applySort}
+                />
+                <SortHeader
+                  label="涨跌幅"
+                  sortKey="change"
+                  class="num"
+                  sort={sort()}
+                  onSort={applySort}
+                />
+                <SortHeader
+                  label="成交额"
+                  sortKey="amount"
+                  class="num"
+                  sort={sort()}
+                  onSort={applySort}
+                />
+                <SortHeader
+                  label="换手"
+                  sortKey="turnover"
+                  class="num"
+                  sort={sort()}
+                  onSort={applySort}
+                />
+                <SortHeader
+                  label="量比"
+                  sortKey="volume"
+                  class="num"
+                  sort={sort()}
+                  onSort={applySort}
+                />
+                <SortHeader
+                  label="涨速"
+                  sortKey="speed"
+                  class="num"
+                  sort={sort()}
+                  onSort={applySort}
+                />
                 <ExtraColumnHeaders />
                 <th class="num market__spark-head">走势</th>
               </tr>
@@ -456,8 +523,8 @@ export function MarketListPanel(props: {
           <Show when={loading()}>
             <div class="market__loading">加载当前页报价…</div>
           </Show>
-          <Show when={allLoading()}>
-            <div class="market__loading">MAC 加载整栏报价并排序… {allProgress()}</div>
+          <Show when={snapshotLoading()}>
+            <div class="market__loading">MAC 拉全表报价并排序… {snapshotProgress()}</div>
           </Show>
           <Show when={!loading() && visibleItems().length === 0}>
             <div class="market__empty">没有匹配的证券</div>
@@ -467,6 +534,23 @@ export function MarketListPanel(props: {
         <footer class="market__foot">
           <span>
             共 {filtered().length} 条 · 已显示 {visibleItems().length} 条 · 滚动加载更多
+            <Show when={sort()}>
+              {(state) => (
+                <>
+                  {' · '}按{SORT_LABEL[state().key] ?? state().key}
+                  {state().dir === 'desc' ? '降序' : '升序'}
+                  <button
+                    class="market__reset"
+                    onClick={() => {
+                      setSort(null)
+                      setLimit(PAGE_SIZE)
+                    }}
+                  >
+                    恢复默认顺序
+                  </button>
+                </>
+              )}
+            </Show>
           </span>
           <button
             class="btn market__export"

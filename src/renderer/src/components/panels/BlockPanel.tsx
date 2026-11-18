@@ -2,6 +2,8 @@
  * 板块/概念浏览器（0x06b9 的 block_*.dat）。
  *
  * 左栏是板块名，右栏是成分股；成分股行情用批量快照补齐，点击行切到主行情。
+ * 成分股全量都在内存里（一次最多 400 只），所以表头排序是纯本地重排，
+ * 不再向服务端要数据。
  */
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
 import type { BlockGroup, Quote } from '@shared/types'
@@ -9,9 +11,15 @@ import { compactAmount, fixed, signedPct, thousands } from '@shared/format'
 import { BOARD_CATEGORIES, loadBoardCategory, type BoardCategory } from '../../lib/board-categories'
 import { api, errorMessage } from '../../lib/client'
 import { openStockMenu } from '../../stores/stockMenu'
-import { createSparklineLoader, requestVisibleSparklines, sparklineOf } from '../../stores/sparklines'
+import {
+  createSparklineLoader,
+  requestVisibleSparklines,
+  sparklineOf
+} from '../../stores/sparklines'
+import { quoteSortValue, sortRows, type QuoteSortKey, type SortState } from '../../lib/table-sort'
 import { IconClose } from '../atoms/Icons'
 import { Sparkline } from '../charts/Sparkline'
+import { SortHeader } from '../atoms/SortHeader'
 import { EXTRA_COLUMNS, ExtraColumnCells, ExtraColumnHeaders } from '../atoms/StockExtraColumns'
 
 interface BlockPanelProps {
@@ -26,6 +34,18 @@ type BlockTabKind = BoardCategory
 const QUOTE_LIMIT = 400
 const QUOTE_CHUNK = 80
 
+/** 页脚「当前按 XX 降序」用的中文列名 */
+const SORT_LABEL: Record<string, string> = {
+  code: '代码',
+  name: '名称',
+  price: '现价',
+  change: '涨幅',
+  amount: '成交额',
+  turnover: '换手',
+  volume: '量比',
+  speed: '涨速'
+}
+
 export function BlockPanel(props: BlockPanelProps): JSX.Element {
   const [kind, setKind] = createSignal<BlockTabKind>('industry')
   const [blocks, setBlocks] = createSignal<BlockGroup[]>([])
@@ -37,6 +57,7 @@ export function BlockPanel(props: BlockPanelProps): JSX.Element {
   const [loading, setLoading] = createSignal(true)
   const [loadingQuotes, setLoadingQuotes] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
+  const [sort, setSort] = createSignal<SortState | null>(null)
   let requestId = 0
   let quoteId = 0
 
@@ -48,6 +69,24 @@ export function BlockPanel(props: BlockPanelProps): JSX.Element {
   })
 
   const quoteMap = createMemo(() => new Map(quotes().map((quote) => [quote.code, quote])))
+
+  /**
+   * 成分股行：默认是文件顺序（板块自己的顺序，一般按权重/代码排在 .dat 里），
+   * 点了表头就按该列重排。缺报价的行沉底，不会因为升序跑到最上面。
+   */
+  const memberCodes = createMemo(() => {
+    const block = selected()
+    if (!block) return []
+    const codes = block.codes.slice(0, QUOTE_LIMIT)
+    const state = sort()
+    if (!state) return codes
+    return sortRows(codes, state, (code) => {
+      if (state.key === 'code') return code
+      const quote = quoteMap().get(code)
+      if (state.key === 'name') return quote?.name ?? block.names[code] ?? code
+      return quoteSortValue(quote, state.key as QuoteSortKey)
+    })
+  })
   const boardQuote = (block: BlockGroup): Quote | undefined =>
     block.indexCode ? boardQuotes()[block.indexCode] : undefined
   const leader = createMemo(() => {
@@ -323,30 +362,75 @@ export function BlockPanel(props: BlockPanelProps): JSX.Element {
                         <col style="width: 48px" />
                         <For each={EXTRA_COLUMNS}>
                           {(column) => (
-                            <col
-                              data-col={column.key}
-                              style={{ width: `${column.width - 2}px` }}
-                            />
+                            <col data-col={column.key} style={{ width: `${column.width - 2}px` }} />
                           )}
                         </For>
                         <col style="width: 58px" />
                       </colgroup>
                       <thead>
                         <tr>
-                          <th>代码</th>
-                          <th>名称</th>
-                          <th class="num">现价</th>
-                          <th class="num">涨幅</th>
-                          <th class="num">成交额</th>
-                          <th class="num">换手</th>
-                          <th class="num">量比</th>
-                          <th class="num">涨速</th>
+                          <SortHeader
+                            label="代码"
+                            sortKey="code"
+                            firstDir="asc"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="名称"
+                            sortKey="name"
+                            firstDir="asc"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="现价"
+                            sortKey="price"
+                            class="num"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="涨幅"
+                            sortKey="change"
+                            class="num"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="成交额"
+                            sortKey="amount"
+                            class="num"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="换手"
+                            sortKey="turnover"
+                            class="num"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="量比"
+                            sortKey="volume"
+                            class="num"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="涨速"
+                            sortKey="speed"
+                            class="num"
+                            sort={sort()}
+                            onSort={setSort}
+                          />
                           <ExtraColumnHeaders />
                           <th class="num block__spark-head">走势</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <For each={block().codes.slice(0, QUOTE_LIMIT)}>
+                        <For each={memberCodes()}>
                           {(code) => {
                             const quote = () => quoteMap().get(code)
                             return (
@@ -429,8 +513,19 @@ export function BlockPanel(props: BlockPanelProps): JSX.Element {
             {BOARD_CATEGORIES.find((item) => item.key === kind())?.label ?? '板块'} ·{' '}
             {blocks().length} 个板块 ·{' '}
             {thousands(blocks().reduce((sum, b) => sum + b.codes.length, 0))} 个代码
+            <Show when={sort()}>
+              {(state) => (
+                <>
+                  {' · '}按{SORT_LABEL[state().key] ?? state().key}
+                  {state().dir === 'desc' ? '降序' : '升序'}
+                  <button class="block__reset" onClick={() => setSort(null)}>
+                    恢复文件顺序
+                  </button>
+                </>
+              )}
+            </Show>
           </span>
-          <span>点击成分股查看行情；行情最多 400 只；板块指数点位/涨跌幅/领涨股已接入</span>
+          <span>点击成分股查看行情；表头可排序；行情最多 400 只</span>
         </footer>
       </section>
     </div>

@@ -525,6 +525,11 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 var(--sp-2) var(--sp-3);
+  /*
+   * 永远预留 10px 滚动条槽位：自选只有几行（不出滚动条）、板块动辄上百行（出滚动条），
+   * 不预留的话同一宽度下两张列表的行宽差 10px，切换页签时整列会横向跳一下。
+   */
+  scrollbar-gutter: stable;
 }
 
 .sidebar__foot {
@@ -535,18 +540,35 @@
   line-height: 1.7;
 }
 
-/* ------------------------------------------------------------ 自选股行 */
-.watch-row {
+/* ---------------------------------------------------------- 左栏股票行 */
+/*
+ * 自选股 / 板块成分股 / 自定义板块 **三张列表共用这一个行组件**
+ * （`components/atoms/StockRow.tsx`），所以样式也只留这一份：
+ *
+ *   名称 + 代码 | 迷你走势 | 最新价 + 涨跌幅 | 删除位（只有自选股有按钮）
+ *
+ * 以前自选股用 `.watch-row`、板块/自定义用 `.sector-row`，两套样式各自长大，
+ * 同一个左栏里板块行的字号更大、留白更多，名称还被挤成「生益…」。
+ * 现在改行内布局只改这里，三张列表不可能再不一致。
+ */
+.stock-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 46px minmax(58px, auto) 20px;
+  /*
+   * 三列：名称（唯一弹性列）| 迷你走势 | 价格 + 涨跌幅。
+   * 价格列给到 66px（「3,587.83」也放得下），三张列表、任意代码都不会因为数字
+   * 长短不同而让列位置左右漂移；不再单独留 20px 删除位，自选的删除按钮压在
+   * 迷你走势那一列上，右侧不留死区。
+   */
+  grid-template-columns: minmax(0, 1fr) 46px minmax(66px, auto);
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 4px 10px;
+  padding: 2px 8px;
   margin-bottom: 1px;
-  border-radius: var(--r-md);
   border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
   text-align: left;
   transition:
     background-color var(--dur-2) var(--ease),
@@ -555,13 +577,13 @@
 }
 
 /* 拖拽中的行淡出，明确指出「正在搬这一行」 */
-.watch-row--dragging {
+.stock-row--dragging {
   opacity: 0.4;
 }
 
 /* 落点指示线：插到这一行前面 / 后面 */
-.watch-row--drop-before::after,
-.watch-row--drop-after::after {
+.stock-row--drop-before::after,
+.stock-row--drop-after::after {
   content: '';
   position: absolute;
   left: var(--sp-2);
@@ -572,25 +594,25 @@
   box-shadow: 0 0 8px rgba(91, 140, 255, 0.8);
 }
 
-.watch-row--drop-before::after {
+.stock-row--drop-before::after {
   top: -1px;
 }
 
-.watch-row--drop-after::after {
+.stock-row--drop-after::after {
   bottom: -1px;
 }
 
-.watch-row:hover {
+.stock-row:hover {
   background: var(--panel-hover);
 }
 
-.watch-row--active {
+.stock-row--active {
   background: var(--panel-active);
   border-color: rgba(91, 140, 255, 0.32);
 }
 
 /* 选中态左侧的高亮竖条 */
-.watch-row--active::before {
+.stock-row--active::before {
   content: '';
   position: absolute;
   left: -1px;
@@ -602,39 +624,47 @@
   background: var(--accent-grad);
 }
 
-.watch-row__main {
+.stock-row__main {
+  /* 名称在上、代码在下：列内两行，子元素是 span，所以靠 flex 撑满名称列宽度
+     （span 是行内元素，没有这层 flex 的话名称会缩成文字宽度，省略号也就不生效） */
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 
-.watch-row__name {
+.stock-row__name {
   font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-1);
   line-height: 1.15;
   overflow: hidden;
-  text-overflow: clip;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.watch-row--long-name .watch-row__name {
-  font-size: 12px;
-}
-
-.watch-row__code {
+/* 代码行只占名称列的下半行；压不下时用省略号，别让它盖到迷你图上 */
+.stock-row__code {
   font-size: var(--fs-2xs);
   color: var(--text-3);
   letter-spacing: 0.04em;
   line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* 迷你走势图：固定 46px 槽位，数据未到也不让右侧价格列移动 */
-.watch-row__spark-slot {
+/* 迷你走势图：固定 46px 槽位（与合并前板块行同宽），数据未到也不让价格列移动 */
+.stock-row__spark {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   width: 46px;
   min-width: 46px;
   height: 20px;
 }
 
-.watch-row .sparkline {
+.stock-row .sparkline {
   width: 46px !important;
   min-width: 46px;
   max-width: 46px;
@@ -643,20 +673,21 @@
   transition: opacity var(--dur-2) var(--ease);
 }
 
-.watch-row:hover .sparkline {
-  opacity: 1;
+.stock-row:hover .sparkline {
+  opacity: 0.35;
 }
 
-.watch-row__nums {
+.stock-row__nums {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 0;
-  min-width: 58px;
+  /* 列宽由网格模板给（66px 起），这里不再设 min-width，免得两处打架 */
+  min-width: 0;
   text-align: right;
 }
 
-.watch-row__price {
+.stock-row__price {
   font-size: var(--fs-sm);
   font-weight: 600;
   line-height: 1.15;
@@ -664,45 +695,55 @@
   padding: 0 3px;
 }
 
-.watch-row__chg {
+.stock-row__chg {
   font-size: var(--fs-2xs);
   line-height: 1.15;
 }
 
 /* 竞价兜底价：只标注「竞价」，不伪造涨跌幅 */
-.watch-row__chg--auction {
+.stock-row__chg--auction {
   color: var(--text-3);
   letter-spacing: 0.04em;
 }
 
-.watch-row__price--up {
+.stock-row__price--up {
   animation: flash-up 700ms var(--ease) both;
 }
 
-.watch-row__price--down {
+.stock-row__price--down {
   animation: flash-down 700ms var(--ease) both;
 }
 
-.watch-row__remove {
+/*
+ * 删除按钮：悬停时才出现，绝对定位压在迷你走势那一列上 —— 不占列宽，
+ * 所以板块 / 自定义列表的右侧不会再出现 20px 的空白，三张列表的列宽也完全一致。
+ */
+.stock-row__remove {
+  position: absolute;
+  top: 50%;
+  right: -4px;
+  transform: translateY(-50%);
   display: grid;
   place-items: center;
   width: 20px;
   height: 20px;
-  flex: none;
   border-radius: var(--r-xs);
   color: var(--text-3);
+  background: var(--panel-solid, var(--panel));
   opacity: 0;
+  pointer-events: none;
   transition:
     opacity var(--dur-2) var(--ease),
     color var(--dur-1) var(--ease),
     background-color var(--dur-1) var(--ease);
 }
 
-.watch-row:hover .watch-row__remove {
+.stock-row:hover .stock-row__remove {
   opacity: 1;
+  pointer-events: auto;
 }
 
-.watch-row__remove:hover {
+.stock-row__remove:hover {
   color: var(--up);
   background: var(--up-soft);
 }

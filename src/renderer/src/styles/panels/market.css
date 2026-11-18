@@ -183,14 +183,6 @@
   letter-spacing: 0.04em;
 }
 
-.ranking__row .tone-up {
-  color: var(--up);
-}
-
-.ranking__row .tone-down {
-  color: var(--down);
-}
-
 .ranking__empty {
   padding: 48px 24px;
   color: var(--text-3);
@@ -417,14 +409,6 @@
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.tape__price.tone-up {
-  color: var(--up);
-}
-
-.tape__price.tone-down {
-  color: var(--down);
 }
 
 .tape__side {
@@ -833,14 +817,6 @@
   white-space: nowrap;
 }
 
-.auction__row .tone-up {
-  color: var(--up);
-}
-
-.auction__row .tone-down {
-  color: var(--down);
-}
-
 .auction__empty {
   padding: 28px 4px;
   color: var(--text-3);
@@ -854,7 +830,6 @@
   color: var(--text-3);
   font-size: var(--fs-2xs);
 }
-
 
 /* ============================================================ 整页逐笔（board）
  * 一屏多列：每列 时间 / 价格 / 量 / 方向，列内按「最新 → 最旧」。

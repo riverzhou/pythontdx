@@ -106,7 +106,7 @@
 ```bash
 npm run dev                 # 开发模式（主进程重启 + 渲染层热更新 + Python 桥接）
 npm run check               # 类型 + Lint + TS 测试 + Python 测试，一条命令
-npm run test                # 只跑 TS 测试（367 个用例）
+npm run test                # 只跑 TS 测试（390 个用例）
 npm run test:python         # 只跑 Python 协议/HTTP 测试（343 个用例）
 npm run audit:data          # 数据覆盖自检（39 项，会触发自动归档；清单见 docs/12）
 npm run audit:docs          # 文档自检：链接/截图/路径引用 + 客户端与服务端路由一致性
@@ -205,7 +205,7 @@ docs/            说明文档；入口 docs/README.md，发布说明在 docs/rel
 逐项映射与核对表见 `docs/23-前后端边界与双端一致性.md`；Web/Electron 界面差异见
 `docs/22` §4.4。
 
-健康度 `npm run check` 全绿（367 个 TS 通过 + 1 skipped；343 个 Python，1 skipped）。
+健康度 `npm run check` 全绿（390 个 TS 通过 + 1 skipped；343 个 Python，1 skipped）。
 2.0.x 新增：信息密度版布局、服务端面板推送 `/api/push`、备份进度 `/api/progress`、
 估值行、图表工具常驻标题行（不折叠、不另占行，更新时间不再做成徽标）；导航改版（去四菜单：左栏「导航」/ 右上角工具 / 「+」页面
 选择器）、表头 sticky 与列宽优化、公告与 F10 同宽、逐笔明细多列整页 + 自动滚屏 +

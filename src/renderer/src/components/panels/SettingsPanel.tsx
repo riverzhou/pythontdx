@@ -324,8 +324,8 @@ export function SettingsPanel(props: { onClose: () => void }): JSX.Element {
 
           <label class="settings__row">
             <div>
-              <div class="settings__label">自选股迷你走势</div>
-              <div class="settings__hint">侧栏每行显示当日分时缩略图。</div>
+              <div class="settings__label">列表迷你走势</div>
+              <div class="settings__hint">自选 / 板块 / 自定义 列表的每一行都显示当日分时缩略图（左栏偏窄时自动隐藏，宽度让给名称）。</div>
             </div>
             <input
               type="checkbox"

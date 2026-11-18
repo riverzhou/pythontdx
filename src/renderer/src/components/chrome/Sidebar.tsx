@@ -11,11 +11,8 @@
  * 其它交互：点标签切换分组；双击标签就地改名；悬停时出现删除按钮；
  * 列表空白处也能接收拖入（追加到末尾）；空分组显示引导文案。
  */
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
+import { createMemo, createSignal, For, Show, type JSX } from 'solid-js'
 import type { Quote, WatchGroup } from '@shared/types'
-import { fixed, signedPct } from '@shared/format'
-import { isTradingNow } from '@shared/market'
-import { createInterval } from '../../lib/dom'
 import {
   appState,
   createGroup,
@@ -23,24 +20,17 @@ import {
   draggingCode,
   moveWatchItem,
   removeGroup,
+  removeWatchItem,
   renameGroup,
   setActiveGroup,
   setDraggingCode,
   updateSettings,
   watchItems
 } from '../../stores/app'
-import { applyQuotes, quoteOf } from '../../stores/quotes'
-import { openStockMenu } from '../../stores/stockMenu'
-import {
-  createSparklineLoader,
-  requestVisibleSparklines,
-  sparklineOf
-} from '../../stores/sparklines'
-import { api, errorMessage } from '../../lib/client'
-import { toneOf } from '../../lib/tone'
+import { quoteOf } from '../../stores/quotes'
+import { createSparklineLoader, requestVisibleSparklines } from '../../stores/sparklines'
 import { sector, setSidebarView, sidebarView, type SectorSelection } from '../../stores/sector'
 import { openView, selectStock } from '../../stores/workspace'
-import { Sparkline } from '../charts/Sparkline'
 import {
   IconColumns,
   IconExpand,
@@ -51,159 +41,14 @@ import {
   IconNav,
   IconPlus
 } from '../atoms/Icons'
-import { WatchRow } from '../atoms/WatchRow'
-
-/**
- * 板块排行 / 自定义排行里的一行。
- *
- * 和自选股行不同，这里没有拖拽和删除：成分股是板块数据，不是用户维护的列表。
- */
-function SectorRow(props: {
-  code: string
-  name: string
-  onPick: () => void
-  index?: number
-  groupId?: string
-}): JSX.Element {
-  const quote = (): Quote | undefined => quoteOf(props.code)
-  const tone = (): string => toneOf(quote()?.changePct)
-  const [dropSide, setDropSide] = createSignal<'before' | 'after' | null>(null)
-  const canDrag = (): boolean => Boolean(props.groupId)
-  return (
-    <button
-      class="sector-row"
-      classList={{
-        'sector-row--dragging': draggingCode() === props.code,
-        'sector-row--drop-before': dropSide() === 'before',
-        'sector-row--drop-after': dropSide() === 'after'
-      }}
-      data-active={appState.activeCode === props.code}
-      data-code={props.code}
-      title={`${props.name} ${props.code.toUpperCase()}${canDrag() ? '（可拖拽排序）' : ''}`}
-      draggable={canDrag()}
-      onDragStart={(event) => {
-        if (!canDrag()) return
-        setDraggingCode(props.code)
-        event.dataTransfer?.setData('text/plain', props.code)
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
-      }}
-      onDragOver={(event) => {
-        if (!canDrag() || !draggingCode() || draggingCode() === props.code) return
-        event.preventDefault()
-        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-        const rect = event.currentTarget.getBoundingClientRect()
-        setDropSide(event.clientY < rect.top + rect.height / 2 ? 'before' : 'after')
-      }}
-      onDragLeave={() => setDropSide(null)}
-      onDrop={(event) => {
-        if (!canDrag()) return
-        event.preventDefault()
-        event.stopPropagation()
-        const code = draggingCode() ?? event.dataTransfer?.getData('text/plain')
-        const groupId = props.groupId
-        const index = props.index
-        const side = dropSide()
-        setDropSide(null)
-        setDraggingCode(null)
-        if (!code || code === props.code || !groupId || index === undefined) return
-        moveWatchItem(code, groupId, side === 'after' ? index + 1 : index)
-      }}
-      onDragEnd={() => {
-        setDropSide(null)
-        setDraggingCode(null)
-      }}
-      onClick={() => props.onPick()}
-      onContextMenu={(event) => openStockMenu(event, { code: props.code, name: props.name })}
-    >
-      <span class="sector-row__main">
-        <span class="sector-row__name">{props.name}</span>
-        <span class="sector-row__code num">{props.code.toUpperCase()}</span>
-      </span>
-      <span class="sector-row__spark">
-        <Show when={sparklineOf(props.code)}>
-          {(data) => (
-            <Sparkline values={data().values} baseline={data().prevClose} width={46} height={22} />
-          )}
-        </Show>
-      </span>
-      <span class="sector-row__nums">
-        <span class="sector-row__price num">{quote() ? fixed(quote()!.price) : '—'}</span>
-        <span class={`sector-row__chg num ${tone()}`}>
-          {quote() ? signedPct(quote()!.changePct) : '—'}
-        </span>
-      </span>
-      <span class="sector-row__tail" aria-hidden="true" />
-    </button>
-  )
-}
+import { StockRow } from '../atoms/StockRow'
 
 export function Sidebar(): JSX.Element {
   /* ------------------------------------------- 自选股 / 板块 / 自定义 三种视图 */
+  /** 自选股列表对应的分组（拖拽排序与删除都作用在它上面） */
+  const watchGroupId = (): string => defaultGroup()?.id ?? appState.activeGroupId
   /** 自定义视图当前选中的分组 */
   const [customSector, setCustomSector] = createSignal<SectorSelection | null>(null)
-  const [sectorLoading, setSectorLoading] = createSignal(false)
-  const [sectorError, setSectorError] = createSignal<string | null>(null)
-
-  /**
-   * 板块成分股不在自选订阅里，按 120 只一批补报价。
-   * 优先走 0x054c 快照（和行情头/主图同一套竞价兜底），失败再退 MAC。
-   * 只走 MAC 时，集合竞价阶段部分代码会停在昨收，左栏就不刷新了。
-   */
-  const loadSectorBatch = async (codes: string[]): Promise<Quote[]> => {
-    try {
-      const quotes = await api.quote.snapshot(codes)
-      if (quotes.length > 0) return quotes
-    } catch {
-      // 继续走 MAC 兜底
-    }
-    return api.quote.macQuotes(codes)
-  }
-
-  const loadSectorQuotes = async (selection: SectorSelection): Promise<void> => {
-    setSectorLoading(true)
-    setSectorError(null)
-    try {
-      const codes = selection.codes
-      for (let start = 0; start < codes.length; start += 120) {
-        const chunk = codes.slice(start, start + 120)
-        if (chunk.length === 0) continue
-        applyQuotes(await loadSectorBatch(chunk))
-      }
-    } catch (cause) {
-      setSectorError(errorMessage(cause))
-    } finally {
-      setSectorLoading(false)
-    }
-  }
-
-  createEffect(() => {
-    const selection = sector()
-    if (!selection || sidebarView() !== 'sector') return
-    void loadSectorQuotes(selection)
-  })
-
-  /** 板块视图的价格同样要求 1 秒；静默刷新，不闪 loading。 */
-  const refreshSectorQuotes = async (selection: SectorSelection): Promise<void> => {
-    const codes = selection.codes
-    try {
-      for (let start = 0; start < codes.length; start += 120) {
-        const chunk = codes.slice(start, start + 120)
-        if (chunk.length === 0) continue
-        applyQuotes(await loadSectorBatch(chunk))
-      }
-    } catch {
-      // 下一拍重试；已有价格继续显示
-    }
-  }
-
-  createInterval(
-    () => {
-      const selection = sector()
-      if (!selection || sidebarView() !== 'sector') return
-      void refreshSectorQuotes(selection)
-    },
-    () => (sidebarView() === 'sector' && isTradingNow() ? 1000 : 30_000)
-  )
 
   const groupSelection = (group: WatchGroup): SectorSelection => ({
     key: `custom:${group.id}`,
@@ -326,6 +171,19 @@ export function Sidebar(): JSX.Element {
     if (!current?.groupId) return
     removeGroup(current.groupId)
     setCustomSector(null)
+  }
+
+  /**
+   * 把一只股票移出当前自定义板块。
+   *
+   * 分组 id 必须现读：`customBoard()` 可能还没选中分组，`undefined` 传给
+   * `removeWatchItem` 会退回「自选」分组，一点「移出」就把自选里的同一只删掉。
+   * 所以拿不到 id 时直接不动。
+   */
+  const removeFromCustomBoard = (code: string): void => {
+    const groupId = customBoard()?.groupId
+    if (!groupId) return
+    removeWatchItem(code, groupId)
   }
 
   /** 拖到列表空白处 → 追加到自选股末尾（自选只有一层） */
@@ -469,10 +327,14 @@ export function Sidebar(): JSX.Element {
           >
             <For each={watchItems()}>
               {(item, index) => (
-                <WatchRow
-                  item={item}
+                <StockRow
+                  code={item.code}
+                  name={item.name}
                   index={index()}
-                  groupId={defaultGroup()?.id ?? appState.activeGroupId}
+                  groupId={watchGroupId()}
+                  flash
+                  onPick={() => selectStock(item.code)}
+                  onRemove={() => removeWatchItem(item.code, watchGroupId())}
                 />
               )}
             </For>
@@ -495,7 +357,6 @@ export function Sidebar(): JSX.Element {
             <IconGrid size={13} />
           </button>
         </div>
-        <Show when={sectorError()}>{(message) => <div class="sector-error">{message()}</div>}</Show>
         <div
           class="sidebar__list sector-list"
           onScroll={(event) => requestVisibleSparklines(event.currentTarget)}
@@ -510,12 +371,9 @@ export function Sidebar(): JSX.Element {
               </div>
             }
           >
-            <Show when={sectorLoading()}>
-              <div class="sector-loading">加载成分股行情…</div>
-            </Show>
             <For each={sectorRows()}>
               {(row) => (
-                <SectorRow code={row.code} name={row.name} onPick={() => selectStock(row.code)} />
+                <StockRow code={row.code} name={row.name} onPick={() => selectStock(row.code)} />
               )}
             </For>
           </Show>
@@ -567,12 +425,15 @@ export function Sidebar(): JSX.Element {
           >
             <For each={customRows()}>
               {(row, index) => (
-                <SectorRow
+                <StockRow
                   code={row.code}
                   name={row.name}
                   index={index()}
                   groupId={customBoard()?.groupId}
+                  flash
                   onPick={() => selectStock(row.code)}
+                  onRemove={() => removeFromCustomBoard(row.code)}
+                  removeTitle="移出板块"
                 />
               )}
             </For>

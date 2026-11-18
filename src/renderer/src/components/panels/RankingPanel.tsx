@@ -5,8 +5,21 @@
  * 「资金流」是全市场两步榜：先取 MAC 报价，再批量补 0x1218 主力净额；
  * 单只资金流失败会跳过该只，不把缺失值当成 0 参与排名。
  * 点击某一行把该股行情塞进 quote store 再切过去，不强行加入自选。
+ *
+ * 表头排序是**本地重排当前这一页**（默认 80 只，全市场模式 300 只）：
+ * 哪一批股票由上面的 tab 决定，表头只决定这一批怎么排。页脚会写明范围，
+ * 免得把「涨幅前 80 里按成交额排」误读成「成交额前 80」。
  */
-import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from 'solid-js'
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  type JSX
+} from 'solid-js'
 import type { CategoryQuote, MacMoneyFlowPoint } from '@shared/types'
 import { compactAmount, fixed, signedPct } from '@shared/format'
 import {
@@ -16,11 +29,17 @@ import {
   mergeMoneyFlowRanking
 } from '@shared/ranking'
 import { api, errorMessage } from '../../lib/client'
-import { createSparklineLoader, requestVisibleSparklines, sparklineOf } from '../../stores/sparklines'
+import {
+  createSparklineLoader,
+  requestVisibleSparklines,
+  sparklineOf
+} from '../../stores/sparklines'
 import { openStockMenu } from '../../stores/stockMenu'
 import { subscribePush } from '../../lib/push'
+import { quoteSortValue, sortRows, type QuoteSortKey, type SortState } from '../../lib/table-sort'
 import { IconClose } from '../atoms/Icons'
 import { Sparkline } from '../charts/Sparkline'
+import { SortHeader } from '../atoms/SortHeader'
 import { EXTRA_COLUMNS, ExtraColumnCells, ExtraColumnHeaders } from '../atoms/StockExtraColumns'
 
 interface RankingPanelProps {
@@ -39,6 +58,19 @@ interface SortTab {
   fullOnly?: boolean
   /** 全市场本地排序方向 */
   ascending?: boolean
+}
+
+/** 页脚「本地排序：XX 降序」用的中文列名 */
+const SORT_LABEL: Record<string, string> = {
+  code: '代码',
+  name: '名称',
+  price: '现价',
+  change: '涨幅',
+  amount: '成交额',
+  turnover: '换手',
+  volume: '量比',
+  speed: '涨速',
+  flow: '主力净额'
 }
 
 const SORTS: SortTab[] = [
@@ -103,7 +135,20 @@ const SORTS: SortTab[] = [
 export function RankingPanel(props: RankingPanelProps): JSX.Element {
   const [sort, setSort] = createSignal(SORTS[0])
   const [rows, setRows] = createSignal<CategoryQuote[]>([])
+  /** 表头点击的本地排序：只重排当前这一页，不影响 tab 选哪批股票 */
+  const [viewSort, setViewSort] = createSignal<SortState | null>(null)
   createSparklineLoader(() => rows().map((quote) => quote.code))
+
+  const sortedRows = createMemo(() => {
+    const state = viewSort()
+    if (!state) return rows()
+    return sortRows(rows(), state, (quote) => {
+      if (state.key === 'code') return quote.code
+      if (state.key === 'name') return quote.name
+      if (state.key === 'flow') return quote.mainNet
+      return quoteSortValue(quote, state.key as QuoteSortKey)
+    })
+  })
   /**
    * 0x054b 不返回量比；用一次 MAC 批量报价补齐缺字段（只补空值，不覆盖原数据）。
    * 同一批代码只补一次，避免 setRows 触发循环。
@@ -287,6 +332,9 @@ export function RankingPanel(props: RankingPanelProps): JSX.Element {
   createEffect(() => {
     const active = sort()
     const full = fullMode()
+    // 换榜单就把本地排序清掉：tab 说的是「哪一批」，表头说的是「这批怎么排」，
+    // 换了批次还沿用上一批的排法会让人以为 tab 失效了
+    setViewSort(null)
     pushDispose?.()
     pushDispose = undefined
     setExpanded(false)
@@ -448,9 +496,7 @@ export function RankingPanel(props: RankingPanelProps): JSX.Element {
               <col style="width: 50px" />
               <col style="width: 58px" />
               <For each={EXTRA_COLUMNS}>
-                {(column) => (
-                  <col data-col={column.key} style={{ width: `${column.width}px` }} />
-                )}
+                {(column) => <col data-col={column.key} style={{ width: `${column.width}px` }} />}
               </For>
               <Show when={flowMode()}>
                 <col style="width: 86px" />
@@ -461,23 +507,77 @@ export function RankingPanel(props: RankingPanelProps): JSX.Element {
             <thead>
               <tr>
                 <th class="ranking__rank">#</th>
-                <th>代码</th>
-                <th>名称</th>
-                <th class="ranking__num">现价</th>
-                <th class="ranking__num">涨幅</th>
-                <th class="ranking__num">成交额</th>
-                <th class="ranking__num">换手</th>
-                <th class="ranking__num">量比</th>
-                <th class="ranking__num">涨速</th>
+                <SortHeader
+                  label="代码"
+                  sortKey="code"
+                  firstDir="asc"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
+                <SortHeader
+                  label="名称"
+                  sortKey="name"
+                  firstDir="asc"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
+                <SortHeader
+                  label="现价"
+                  sortKey="price"
+                  class="ranking__num"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
+                <SortHeader
+                  label="涨幅"
+                  sortKey="change"
+                  class="ranking__num"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
+                <SortHeader
+                  label="成交额"
+                  sortKey="amount"
+                  class="ranking__num"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
+                <SortHeader
+                  label="换手"
+                  sortKey="turnover"
+                  class="ranking__num"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
+                <SortHeader
+                  label="量比"
+                  sortKey="volume"
+                  class="ranking__num"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
+                <SortHeader
+                  label="涨速"
+                  sortKey="speed"
+                  class="ranking__num"
+                  sort={viewSort()}
+                  onSort={setViewSort}
+                />
                 <ExtraColumnHeaders />
                 <Show when={flowMode()}>
-                  <th class="ranking__num">主力净额 / 占比</th>
+                  <SortHeader
+                    label="主力净额 / 占比"
+                    sortKey="flow"
+                    class="ranking__num"
+                    sort={viewSort()}
+                    onSort={setViewSort}
+                  />
                 </Show>
                 <th class="ranking__num ranking__spark-head">走势</th>
               </tr>
             </thead>
             <tbody>
-              <For each={rows()}>
+              <For each={sortedRows()}>
                 {(quote, index) => (
                   <tr
                     data-code={quote.code}
@@ -558,6 +658,17 @@ export function RankingPanel(props: RankingPanelProps): JSX.Element {
                   ? 'MAC 0x122B'
                   : '0x054b'}
           </span>
+          <Show when={viewSort()}>
+            {(state) => (
+              <span class="ranking__local">
+                本地排序：{SORT_LABEL[state().key] ?? state().key}
+                {state().dir === 'desc' ? '降序' : '升序'}（只重排当前 {rows().length} 行）
+                <button class="ranking__reset" onClick={() => setViewSort(null)}>
+                  恢复榜单顺序
+                </button>
+              </span>
+            )}
+          </Show>
           <Show
             when={!fullMode() && hasMore()}
             fallback={

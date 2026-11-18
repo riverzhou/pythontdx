@@ -27,6 +27,63 @@
   padding-left: 4px;
 }
 
+/* ---------------------------------------------------------------------------
+ * 可排序表头（<SortHeader />）
+ * 三张股票表共用一套视觉：未排序是淡 ↕，升序 ▲ / 降序 ▼ 且整格变强调色。
+ * 选择器都带表名，是为了压过各表 `th { color: var(--text-3) }` 的同权规则。
+ * ------------------------------------------------------------------------- */
+.market__table th.sort-head,
+.block__table th.sort-head,
+.ranking__table th.sort-head {
+  cursor: pointer;
+  user-select: none;
+}
+
+.market__table th.sort-head:hover,
+.block__table th.sort-head:hover,
+.ranking__table th.sort-head:hover {
+  color: var(--text-1);
+}
+
+.market__table th.sort-head--asc,
+.market__table th.sort-head--desc,
+.block__table th.sort-head--asc,
+.block__table th.sort-head--desc,
+.ranking__table th.sort-head--asc,
+.ranking__table th.sort-head--desc {
+  color: var(--accent);
+}
+
+.market__table th.sort-head:focus-visible,
+.block__table th.sort-head:focus-visible,
+.ranking__table th.sort-head:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.sort-head__arrow {
+  display: inline-block;
+  min-width: 9px;
+  margin-left: 3px;
+  color: var(--text-3);
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0.4;
+  transition:
+    opacity var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+
+th.sort-head:hover .sort-head__arrow {
+  opacity: 0.9;
+}
+
+th.sort-head--asc .sort-head__arrow,
+th.sort-head--desc .sort-head__arrow {
+  color: var(--accent);
+  opacity: 1;
+}
+
 .market__spark-cell .sparkline,
 .ranking__spark-cell .sparkline,
 .block__spark-cell .sparkline {
@@ -89,4 +146,29 @@
 .unusual__table-wrap,
 .dragon__table-wrap {
   padding-right: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * 三张股票表页脚的「恢复默认顺序」：文字链，不跟导出按钮抢位置
+ * （页脚左侧是统计文案，插一个实心按钮会把它挤成两行）
+ * ------------------------------------------------------------------------- */
+.market__reset,
+.block__reset,
+.ranking__reset {
+  margin-left: 5px;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.market__reset:hover,
+.block__reset:hover,
+.ranking__reset:hover {
+  color: var(--text-1);
 }

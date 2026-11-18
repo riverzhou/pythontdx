@@ -101,103 +101,6 @@
   font-size: var(--fs-2xs);
 }
 
-.sector-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 46px minmax(58px, auto) 20px;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 4px 10px;
-  margin-bottom: 1px;
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color var(--dur-2) var(--ease),
-    border-color var(--dur-2) var(--ease);
-}
-
-.sector-row:hover {
-  background: var(--panel-hover);
-}
-
-.sector-row[data-active='true'] {
-  background: var(--panel-active);
-  border-color: rgba(91, 140, 255, 0.32);
-  color: var(--text-1);
-}
-
-.sector-row__main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.sector-row__name {
-  overflow: hidden;
-  color: var(--text-1);
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sector-row__code {
-  color: var(--text-3);
-  font-size: var(--fs-2xs);
-  letter-spacing: 0.04em;
-  line-height: 1.15;
-}
-
-.sector-row__nums {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0;
-  min-width: 58px;
-  text-align: right;
-}
-
-.sector-row__price {
-  color: var(--text-1);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  line-height: 1.15;
-}
-
-.sector-row__chg {
-  min-width: 0;
-  font-size: var(--fs-2xs);
-  line-height: 1.15;
-  text-align: right;
-}
-
-/* 与自选股行右侧的删除按钮占位对齐，三个栏目价格列才不会错位 */
-.sector-row__tail {
-  width: 20px;
-  height: 1px;
-}
-
-.sector-loading {
-  padding: 6px 10px;
-  color: var(--text-3);
-  font-size: var(--fs-2xs);
-}
-
-.sector-error {
-  margin: 0 var(--sp-2) var(--sp-2);
-  padding: 4px 8px;
-  border-radius: var(--r-sm);
-  background: rgba(248, 81, 73, 0.12);
-  color: var(--down);
-  font-size: var(--fs-2xs);
-}
-
 /* --------------------------------------------- 板块选择大窗口 */
 .sector-picker {
   position: fixed;
@@ -530,27 +433,6 @@
   justify-content: flex-end;
   gap: 6px;
   margin-top: 12px;
-}
-
-/* 板块排行行里的迷你走势图 */
-.sector-row__spark {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  width: 46px;
-  height: 20px;
-}
-
-.sector-row__spark .sparkline {
-  width: 46px !important;
-  min-width: 46px;
-  height: 20px;
-  opacity: 0.95;
-  transition: opacity var(--dur-2) var(--ease);
-}
-
-.sector-row:hover .sparkline {
-  opacity: 1;
 }
 
 /* --------------------------------------------------------------------------
@@ -1023,18 +905,9 @@
   transition: width 220ms ease-out;
 }
 
-/* 73：自选/自定义/多股同列的拖动排序反馈 */
-.sector-row--dragging,
+/* 73：多股同列的拖动排序反馈（左栏股票行的反馈在 layout/shell.css 的 .stock-row） */
 .multi-card--dragging {
   opacity: 0.35;
-}
-
-.sector-row--drop-before {
-  box-shadow: inset 0 2px 0 var(--accent);
-}
-
-.sector-row--drop-after {
-  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .multi-card--drop {
